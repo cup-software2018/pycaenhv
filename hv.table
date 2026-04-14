@@ -1,0 +1,6 @@
+#
+# name     slot   channel    HV      R     pmtid    group
+  pmt1	   0   	  0  	     1914.0  2.2   1  	    10
+  pmt2	   0   	  1  	     1914.0  2.2   2  	    10
+  pmt3	   0   	  2  	     1914.0  2.2   3  	    10
+  pmt4	   0   	  3  	     1914.0  2.2   4  	    10
