@@ -10,7 +10,7 @@ A lightweight Python toolkit designed for efficient control and monitoring of CA
 
 ## 2. File Structure
 - `caenhv.py`: Core module for C library binding and hardware communication.
-- `hv_channel.py`: Data model for individual channel state and properties.
+- `hvchannel.py`: Data model for individual channel state and properties.
 - `hvcontrol.py`: Main CLI controller and entry point.
 - `hv.table`: Configuration file containing channel mappings and HV parameters.
 
