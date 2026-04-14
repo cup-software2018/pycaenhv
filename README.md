@@ -11,28 +11,34 @@ A lightweight Python toolkit designed for efficient control and monitoring of CA
 ## 2. File Structure
 - `caenhv.py`: Core module for C library binding and hardware communication.
 - `hvchannel.py`: Data model for individual channel state and properties.
-- `hvcontrol.py`: Main CLI controller and entry point.
+- `hvcontrol.py`: CLI controller and entry point.
+- `hvcontrol_gui.py`: GUI controller and entry point.
 - `hv.table`: Configuration file containing channel mappings and HV parameters.
 
 ## 3. Prerequisites
 
-### CAEN HV Wrapper Library
-The official `CAENHVWrapper` library must be installed. After installation, ensure the library path is added to your environment variables:
+### 1) CAEN HV Wrapper Library
+The official `CAENHVWrapper` library must be installed. Ensure the library path is added to your environment variables:
 ```bash
 export LD_LIBRARY_PATH=/path/to/caen/lib:$LD_LIBRARY_PATH
 ```
 
-### Dependency: OpenSSL 1.1
-On modern Linux distributions (e.g., AlmaLinux 9, Ubuntu 22.04+), you may need to install OpenSSL 1.1 compatibility packages to resolve `libcrypto.so.1.1` dependencies.
+### 2) Python Dependencies
+To use the GUI, install PySide6:
+```bash
+pip install PySide6
+```
+
+### 3) System Dependencies (OpenSSL 1.1)
+On modern Linux distributions (e.g., AlmaLinux 9, Ubuntu 22.04+), you may need OpenSSL 1.1 compatibility packages to resolve `libcrypto.so.1.1` errors.
 - **RHEL/Rocky/AlmaLinux**:
 ```bash
 sudo dnf install compat-openssl11
 ```
-- **Ubuntu 22.04+**: Manual installation of the `libssl1.1` package is required.
 
 ## 4. Usage
 
-### Configuring the HV Table (`hv.table`)
+### 0) Configuring the HV Table (`hv.table`)
 Create a text file to define your detector channels. (Space or tab-delimited)
 ```text
 # name    slot   channel    HV      R(Mohm)  pmtid   group
@@ -41,7 +47,7 @@ pmt_02    0      1          1850.0  2.2      2       10
 ...
 ```
 
-### CLI Commands
+### 1) CLI Commands
 All actions support the `-g [group_name]` flag to target specific groups (default is `all`).
 
 1. **Apply Settings (Voltage & Current)**
@@ -66,3 +72,14 @@ python hvcontrol.py mon
 ```bash
 python hvcontrol.py off -g all
 ```
+
+### 2) Launch the GUI
+```bash
+python hvcontrol_gui.py
+```
+
+#### GUI Workflow
+1. **Load Data**: Click **Browse...** to select your `hv.table` file. *(Note: You must load a table before connecting).*
+2. **Connect**: Enter the target IP address and click **Connect**. Monitoring will start automatically.
+3. **Filter & Control Group**: Select a specific group from the **Group Filter** dropdown. The selected channels will turn blue. Use the **Power ON / OFF** buttons to control only the filtered group.
+4. **Individual Control**: Double-click the **Status** cell (e.g., the word "OFF" or "ON") of a specific channel to safely toggle its power.
