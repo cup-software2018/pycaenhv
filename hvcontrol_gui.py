@@ -9,8 +9,15 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
 
 # Import hardware control modules
-from caenhv import CaenHV, N1470
+from caenhv import CaenHV, SY4527, SY5527, N1470
 from hvchannel import HVChannel
+
+# change SY5527 to SY4527 or N1470 if needed
+CAENSYS = SY5527
+IPADDR = "192.168.0.152"
+
+USERNAME = "admin"
+PASSWORD = "admin"
 
 
 def load_hv_table(filepath):
@@ -59,7 +66,19 @@ class HVControlApp(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # --- Top Row: Connection & Group Control Area ---
+        # --- Top Row: File Selection Area ---
+        file_layout = QHBoxLayout()
+        self.file_input = QLineEdit("hv.table")
+        self.file_input.setReadOnly(True)
+        self.btn_browse = QPushButton("Browse...")
+        self.btn_browse.clicked.connect(self.browse_file)
+
+        file_layout.addWidget(QLabel("Table File:"))
+        file_layout.addWidget(self.file_input)
+        file_layout.addWidget(self.btn_browse)
+        layout.addLayout(file_layout)
+
+        # --- Second Row: Connection & Group Control Area ---
         conn_layout = QHBoxLayout()
 
         self.ip_input = QLineEdit("192.168.0.152")
@@ -91,18 +110,6 @@ class HVControlApp(QMainWindow):
         conn_layout.addWidget(self.btn_off)
         layout.addLayout(conn_layout)
 
-        # --- Second Row: File Selection Area ---
-        file_layout = QHBoxLayout()
-        self.file_input = QLineEdit("hv.table")
-        self.file_input.setReadOnly(True)
-        self.btn_browse = QPushButton("Browse...")
-        self.btn_browse.clicked.connect(self.browse_file)
-
-        file_layout.addWidget(QLabel("Table File:"))
-        file_layout.addWidget(self.file_input)
-        file_layout.addWidget(self.btn_browse)
-        layout.addLayout(file_layout)
-
         # --- Monitoring Table ---
         self.table = QTableWidget()
         self.table.setColumnCount(8)
@@ -111,11 +118,13 @@ class HVControlApp(QMainWindow):
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-        # Disable editing for all cells
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Enable double-click to edit (Specific columns will be enabled in filter_table)
+        self.table.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
 
-        # Connect double click signal for power toggle
+        # Connect signals
         self.table.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.table.itemChanged.connect(self.on_item_changed)
 
         layout.addWidget(self.table)
 
@@ -173,6 +182,13 @@ class HVControlApp(QMainWindow):
 
             for col, item in enumerate(items):
                 item.setTextAlignment(Qt.AlignCenter)
+
+                # Enable editing only for Name (1) and Set (V) (4) columns
+                if col in [1, 4]:
+                    item.setFlags(item.flags() | Qt.ItemIsEditable)
+                else:
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+
                 self.table.setItem(row, col, item)
 
             self.table.item(row, 0).setData(Qt.UserRole, ch)
@@ -186,8 +202,11 @@ class HVControlApp(QMainWindow):
 
             ip = self.ip_input.text()
             try:
-                self.hv.init_system(N1470, ip)
+                self.hv.init_system(CAENSYS, IPADDR, USERNAME, PASSWORD)
                 self.is_connected = True
+
+                # Automatically synchronize hardware with table settings
+                self._sync_hardware_settings()
 
                 # Update UI state
                 self.btn_connect.setText("Disconnect")
@@ -209,6 +228,55 @@ class HVControlApp(QMainWindow):
             self.btn_connect.setText("Connect")
             self.btn_on.setEnabled(False)
             self.btn_off.setEnabled(False)
+
+    def on_item_changed(self, item):
+        """
+        Handles changes to table items (Name or Set Voltage).
+        """
+        col = item.column()
+        row = item.row()
+
+        # We only care about Name (1) and Set (V) (4)
+        if col not in [1, 4]:
+            return
+
+        # Retrieve the channel object
+        ch = self.table.item(row, 0).data(Qt.UserRole)
+        if not ch:
+            return
+
+        # Block signals to prevent recursion when updating text programmatically
+        self.table.blockSignals(True)
+
+        try:
+            new_val = item.text().strip()
+
+            if col == 1:  # Name
+                ch.name = new_val
+                if self.is_connected:
+                    self.hv.set_name(ch.slot, ch.channel, ch.name)
+
+            elif col == 4:  # Set (V)
+                try:
+                    v_set = float(new_val)
+                    ch.hv_set = v_set
+
+                    if self.is_connected:
+                        # Re-calculate I0 limit based on new voltage
+                        i_limit = (ch.hv_set / ch.r_val) * 1.1
+                        self.hv.set_vset(ch.slot, ch.channel, ch.hv_set)
+                        self.hv.set_iset(ch.slot, ch.channel, i_limit)
+                except ValueError:
+                    # Restore old value if input is invalid
+                    item.setText(f"{ch.hv_set:.2f}")
+                    QMessageBox.warning(
+                        self, "Invalid Input", "Please enter a valid number for Voltage.")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Sync Error",
+                                f"Failed to update hardware:\n{e}")
+
+        self.table.blockSignals(False)
 
     def on_item_double_clicked(self, item):
         if not self.is_connected:
@@ -298,6 +366,24 @@ class HVControlApp(QMainWindow):
             if selected_group == "All" or ch.group == selected_group:
                 self.hv.turn_off(ch.slot, ch.channel)
         self.update_monitor()
+
+    def _sync_hardware_settings(self):
+        """
+        Automatically applies V0Set, I0Set, and Name settings to all loaded channels.
+        """
+        try:
+            for ch in self.all_channels:
+                # Calculate current limit in uA
+                i_set = ch.hv_set / ch.r_val
+                i_limit = i_set * 1.1
+
+                # Apply settings to hardware
+                self.hv.set_vset(ch.slot, ch.channel, ch.hv_set)
+                self.hv.set_iset(ch.slot, ch.channel, i_limit)
+                self.hv.set_name(ch.slot, ch.channel, ch.name)
+        except Exception as e:
+            # Re-raise so the caller can handle/show the error
+            raise Exception(f"Hardware synchronization failed: {e}")
 
     def closeEvent(self, event):
         if self.is_connected:

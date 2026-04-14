@@ -6,8 +6,11 @@ from caenhv import CaenHV, SY4527, SY5527, N1470
 from hvchannel import HVChannel
 
 # change SY5527 to SY4527 or N1470 if needed
-CAENSYS = N1470
+CAENSYS = SY5527
 IPADDR = "192.168.0.152"
+
+USERNAME = "admin"
+PASSWORD = "admin"
 
 
 def load_hv_table(filepath):
@@ -53,9 +56,10 @@ def apply_hv_settings(hv, channels, group):
             # Add a 10% safety margin to prevent nuisance tripping (optional but recommended)
             i_limit = i_set * 1.1
 
-            # Apply Voltage and Current settings
+            # Apply Voltage, Current, and Name settings
             hv.set_vset(ch.slot, ch.channel, ch.hv_set)
             hv.set_iset(ch.slot, ch.channel, i_limit)
+            hv.set_name(ch.slot, ch.channel, ch.name)
 
 
 def _monitor_loop(stdscr, hv, channels, group):
@@ -97,14 +101,12 @@ def main():
         description="CAEN HV Control & Monitoring Tool")
 
     # Positional argument: Action
-    parser.add_argument("action", choices=['mon', 'on', 'off', 'set'],
-                        help="Action to perform: mon(Monitor), on(Power On), off(Power Off), set(Apply Voltage Table)")
+    parser.add_argument("action", choices=['mon', 'on', 'off'],
+                        help="Action to perform: mon(Monitor), on(Power On), off(Power Off)")
 
     # Optional arguments
     parser.add_argument("-g", "--group", default="all",
                         help="Target group name from the table (default: all)")
-    parser.add_argument("-i", "--ip", default=IPADDR,
-                        help="IP address of the CAEN HV mainframe")
     parser.add_argument("-t", "--table", default="hv_table.txt",
                         help="Path to the HV configuration table file")
 
@@ -123,9 +125,14 @@ def main():
     # 3. Connect and execute action
     with CaenHV() as hv:
         try:
-            hv.init_system(CAENSYS, args.ip)
+            hv.init_system(CAENSYS, IPADDR, USERNAME, PASSWORD)
+
+            # Automatically synchronize hardware with table settings (all channels)
+            print(
+                f"Synchronizing hardware with {args.table} for ALL groups...")
+            apply_hv_settings(hv, fChannels, "all")
         except Exception as e:
-            print(f"Failed to connect to {args.ip}: {e}")
+            print(f"Failed to connect or sync with {IPADDR}: {e}")
             sys.exit(1)
 
         if args.action == 'mon':
@@ -147,13 +154,6 @@ def main():
             print("Command sent. Switching to monitoring...")
             time.sleep(1)  # Brief pause to show the message
             monitoring(hv, fChannels, args.group)
-
-        elif args.action == 'set':
-            # Just apply settings and exit
-            print(
-                f"Applying HV settings (V0Set & I0Set) for group '{args.group}'...")
-            apply_hv_settings(hv, fChannels, args.group)
-            print("Done.")
 
 
 if __name__ == "__main__":

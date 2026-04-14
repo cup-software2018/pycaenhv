@@ -60,7 +60,7 @@ class CaenHV:
         self._lib.CAENHV_GetError.argtypes = [c_int]
         self._lib.CAENHV_GetError.restype = c_char_p
 
-    def init_system(self, system_type, ip_address, username="", password=""):
+    def init_system(self, system_type, ip_address, username="admin", password="admin"):
         # Convert strings to C char pointers
         c_ip = c_char_p(ip_address.encode('utf-8'))
         c_user = c_char_p(username.encode('utf-8'))
@@ -128,6 +128,8 @@ class CaenHV:
         # Create and populate the appropriate array based on parameter type
         if param_type == 'float':
             val_array = (c_float * 1)(value)
+        elif param_type == 'string':
+            val_array = ctypes.create_string_buffer(value.encode('utf-8'))
         else:
             val_array = (c_int * 1)(value)
 
@@ -175,6 +177,10 @@ class CaenHV:
     def turn_off(self, slot, channel):
         # Power Off Channel (Pw = 0)
         self.set_ch_param(slot, channel, "Pw", 0, param_type='int')
+
+    def set_name(self, slot, channel, name):
+        # Set Channel Name
+        self.set_ch_param(slot, channel, "Name", name, param_type='string')
 
     def get_status(self, slot, channel):
         # Get Channel Status (Status is returned as an integer bitmask)
