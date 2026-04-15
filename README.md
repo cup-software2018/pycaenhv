@@ -1,36 +1,39 @@
 # pycaenhv: Python Toolkit for CAEN High Voltage Systems
 
-A modernized, lightweight Python toolkit designed for efficient control and monitoring of CAEN High Voltage (HV) devices (SY series mainframes, NDT1470, etc.). 
+A modernized, lightweight Python toolkit for controlling and monitoring CAEN High Voltage (HV) devices (SY series mainframes, N1470, etc.).
 
-This project uses a **ZeroMQ-based Server-Client architecture** to allow multiple simultaneous connections, remote monitoring, and robust background operation.
+This project uses a **ZeroMQ-based Server-Client architecture** to allow multiple simultaneous connections, remote monitoring, and robust background operation. A dedicated **slow-control logger** can forward long-term telemetry to a time-series database (e.g. InfluxDB) for Grafana dashboards.
 
 ## 1. Key Features
 - **Server-Client Architecture**: A central server manages the hardware link, while multiple CLI/GUI clients can connect simultaneously.
-- **Table-less Server**: The server automatically discovers all available hardware slots and channels. Configuration (naming, grouping) is managed by the clients.
-- **Automated Parameter Calculation**: Clients automatically calculate current limits ($I_0Set$) based on target voltage ($V$) and resistance ($R$ in MΩ) using Ohm's Law ($I = V/R$), including a 10% safety margin.
-- **Daemon Support**: The server can run in the background with robust logging and signal handling.
-- **Multi-Client Monitoring**: ZeroMQ PUB/SUB pattern allows real-time telemetry broadcasting to all connected clients.
-- **GUI & CLI**: Professional terminal dashboard (CLI) and a flexible PySide6 GUI with remote connection support.
+- **Table-less Server**: The server automatically discovers all available hardware slots and channels. Configuration (naming, grouping) is managed by the clients via `hv.table`.
+- **Automated Parameter Calculation**: Current limits ($I_0Set$) are automatically derived from target voltage and resistance ($I = V/R$) with a 10% safety margin.
+- **Daemon Support**: Both the server and the logger can run in the background with PID file management and signal handling.
+- **Multi-Client Monitoring**: ZeroMQ PUB/SUB pattern allows 1 Hz real-time telemetry broadcasting to all connected clients simultaneously.
+- **Slow-Control Logging**: `hvlogger.py` periodically records channel V/I, server health, and its own health to a time-series DB for long-term Grafana monitoring.
+- **GUI & CLI Clients**: Professional terminal dashboard (CLI) and a PySide6 GUI with remote server address support.
 
 ## 2. File Structure
 - `caenhv.py`: Core hardware interface wrapping `CAENHVWrapper` via `ctypes`. Supports dynamic crate map discovery.
-- `hvserver.py`: Central background service. Manages the direct CAEN connection and ZeroMQ sockets.
-- `hvclient.py`: Shared communication library used by both CLI and GUI. Handles command timeouts and reconnection.
-- `hvcontrol.py`: CLI client (Local Only). Table-based monitoring and control.
-- `hvcontrol_gui.py`: GUI client (Local/Remote). Supports server address selection and interactive table editing.
-- `hvconfig.py`: Centralized configuration (defaults for IP, Ports, and Credentials).
-- `hv.table`: (User-provided) Configuration file for channel-to-pmt mapping.
+- `hvconfig.py`: Centralized configuration for all services (hardware settings, ZMQ ports, service file paths).
+- `hvserver.py`: Central background service. Manages the direct CAEN hardware connection and ZeroMQ sockets.
+- `hvclient.py`: Shared ZMQ communication library used by CLI, GUI, and logger.
+- `hvcontrol.py`: CLI client for table-based monitoring and control.
+- `hvcontrol_gui.py`: GUI client with remote server address selection and interactive table editing.
+- `hvlogger.py`: Slow-control logger. Polls server telemetry and writes to a time-series DB (stubs provided).
+- `caenprobe.py`: Standalone diagnostic tool to inspect active CAEN slots and channels.
+- `hvchannel.py`: Shared data model for individual channel parameters.
+- `hv.table`: (User-provided) Configuration file for channel-to-detector mapping.
 
 ## 3. Prerequisites
 
 ### 1) CAEN HV Wrapper Library
-Official `CAENHVWrapper` library must be installed and in your library path:
+The official `CAENHVWrapper` C library must be installed and visible to the dynamic linker:
 ```bash
 export LD_LIBRARY_PATH=/path/to/caen/lib:$LD_LIBRARY_PATH
 ```
 
 ### 2) Python Dependencies
-Requires `pyzmq` for communication and `PySide6` for the GUI:
 ```bash
 pip install pyzmq PySide6
 ```
@@ -38,64 +41,117 @@ pip install pyzmq PySide6
 ### 3) System Dependencies (OpenSSL 1.1)
 CAEN libraries often require OpenSSL 1.1 compatibility:
 - **RHEL/Rocky/AlmaLinux**: `sudo dnf install compat-openssl11`
+- **Qt xcb plugin**: `sudo dnf install xcb-util-cursor`
 
-## 4. Usage Flow
+## 4. Configuration
+
+### `hvconfig.py` and `config.json`
+All defaults are defined in `hvconfig.py`, organized by service:
+
+| Section | Constants |
+|---------|-----------|
+| Hardware | `IP_ADDRESS`, `SYSTEM_TYPE`, `USERNAME`, `PASSWORD` |
+| ZMQ Ports | `CMD_PORT` (5555), `PUB_PORT` (5556) |
+| Server service | `SERVER_LOG_FILE`, `SERVER_PID_FILE` |
+| Logger service | `LOGGER_LOG_FILE`, `LOGGER_PID_FILE`, `LOGGER_INTERVAL` |
+
+Create a `config.json` in the project root to override any setting without modifying source code:
+```json
+{
+  "IP_ADDRESS": "172.16.2.51",
+  "SYSTEM_TYPE": 2,
+  "CMD_PORT": 5555,
+  "PUB_PORT": 5556,
+  "SERVER_LOG_FILE": "hvserver.log",
+  "SERVER_PID_FILE": "hvserver.pid",
+  "LOGGER_LOG_FILE": "hvlogger.log",
+  "LOGGER_PID_FILE": "hvlogger.pid",
+  "LOGGER_INTERVAL": 60.0
+}
+```
+*(System Type: 2 = SY4527, 3 = SY5527, 6 = N1470)*
+
+### `hv.table` Format
+Space-delimited text file mapping detector channels:
+```text
+# name   slot  channel  HV(V)   R(MOhm)  pmtid  group
+pmt_01   0     0        1914.0  2.2      1      10
+pmt_02   0     1        1850.0  2.2      2      10
+```
+
+## 5. Usage
 
 ### Step 1: Start the Server (`hvserver.py`)
-The server must be running to handle hardware communication.
+The server must be running before any client can connect.
 
-**Foreground Mode (with output):**
 ```bash
-python hvserver.py --ip [MAINFRAME_IP] --sys [SYS_TYPE]
+# Foreground (with log to stdout)
+python hvserver.py
+
+# Daemon mode (background)
+python hvserver.py --daemon
+
+# With custom IP / system type
+python hvserver.py --ip 172.16.2.51 --sys 2
+```
+*The server auto-discovers all slots and channels. Check `hvserver.log` for details.*
+
+**Server management:**
+```bash
+kill -0 $(cat hvserver.pid) && echo "Running"  # check alive
+kill $(cat hvserver.pid)                        # graceful stop
 ```
 
-**Daemon Mode (Background):**
+### Step 2: Connect a Client
+
+#### CLI (`hvcontrol.py`)
 ```bash
-python hvserver.py --daemon --log hvserver.log
+python hvcontrol.py mon -t hv.table          # monitor all channels
+python hvcontrol.py on  -g 10 -t hv.table   # power ON group 10, then monitor
+python hvcontrol.py off -t hv.table          # power OFF all, then monitor
 ```
-*The server will automatically discover all slots and channels. Check `hvserver.log` for details.*
+*Press `q` to exit the monitoring dashboard.*
 
-### Step 2: Launch a Client
-
-#### CLI Client (Local Monitoring)
-```bash
-# Monitor all channels in hv.table
-python hvcontrol.py mon -t hv.table
-
-# Power on a specific group
-python hvcontrol.py on -g 10 -t hv.table
-```
-
-#### GUI Client (Remote/Local Monitoring)
+#### GUI (`hvcontrol_gui.py`)
 ```bash
 python hvcontrol_gui.py
 ```
 1. **Load Table**: Click **Browse...** to select your `hv.table`.
-2. **Set Server**: Enter the **Server Address** (IP or `localhost`).
-3. **Connect**: Click **Connect**. The client will synchronize your table settings (Names, I-limits) with the server.
-4. **Interactive Control**: 
-   - **Edit VSet**: Double-click "Set (V)" cells to change voltage (I-limit is auto-recalculated).
-   - **Toggle Power**: Double-click the "Status" cell of an individual channel.
-   - **Group Control**: Use the "Group Filter" and the Power ON/OFF buttons.
+2. **Set Server**: Enter the **Server Address** (`localhost` or remote IP).
+3. **Connect**: Click **Connect**. Table settings (Names, V, I-limits) are synchronized to hardware.
+4. **Interactive Control**:
+   - **Edit VSet / Name**: Double-click a cell in the **Set (V)** or **Name** column.
+   - **Toggle Power**: Double-click a channel's **Status** cell.
+   - **Group Control**: Use the **Group Filter** dropdown and **Power ON / OFF** buttons.
 
-## 5. Communications Protocol
-- **CMD Port (5555)**: ZMQ REQ/REP pattern for explicit commands (Turn ON, Set Voltage).
-- **PUB Port (5556)**: ZMQ PUB/SUB pattern for 1Hz real-time telemetry broadcasting.
+### Step 3: Start the Logger (`hvlogger.py`)
+The logger runs independently and periodically records telemetry to a time-series DB.
 
-## 6. Configuration Management
-To avoid modifying source code for site-specific settings, `hvconfig.py` manages all defaults.
+```bash
+# Foreground test (10 s interval, debug output)
+python hvlogger.py --interval 10 --debug
 
-### Using `config.json`
-You can create a `config.json` in the project root to override any default settings without touching the Python code. If this file exists, it is loaded automatically.
+# Daemon mode (60 s interval, default)
+python hvlogger.py --daemon
 
-**Example `config.json`:**
-```json
-{
-  "IP_ADDRESS": "192.168.0.152",
-  "SYSTEM_TYPE": 3,
-  "CMD_PORT": 5555,
-  "PUB_PORT": 5556,
-  "LOG_FILE": "hvserver.log"
-}
+# Remote server
+python hvlogger.py --host 192.168.0.10 --daemon
 ```
-*(System Type: 2 for SY4527, 3 for SY5527, 6 for N1470)*
+
+**Logger management:**
+```bash
+kill -0 $(cat hvlogger.pid) && echo "Running"   # check alive
+tail -f hvlogger.log                             # watch log
+kill $(cat hvlogger.pid)                         # graceful stop
+```
+
+**Implementing DB writes:**
+Open `hvlogger.py` and fill in the three stub functions for your chosen DB:
+- `db_connect()` — open connection
+- `db_write_channels(db, records)` — per-channel V/I/status data
+- `db_write_server_health(db, record)` — server ping/alive
+- `db_write_logger_health(db, record)` — logger uptime/memory/errors
+
+## 6. Communications Protocol
+- **CMD Port (5555)**: ZMQ REQ/REP — explicit commands (turn on, set voltage, ping).
+- **PUB Port (5556)**: ZMQ PUB/SUB — 1 Hz telemetry broadcast (VMon, IMon, Status per channel).
