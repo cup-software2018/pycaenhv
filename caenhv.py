@@ -1,5 +1,5 @@
 import ctypes
-from ctypes import c_int, c_char_p, c_void_p, c_ushort, c_float, c_short, byref, POINTER
+from ctypes import c_int, c_char_p, c_void_p, c_ushort, c_float, c_short, c_ubyte, byref, cast, POINTER
 from ctypes.util import find_library
 import os
 
@@ -64,8 +64,14 @@ class CaenHV:
 
         # Bind CAENHV_GetCrateMap
         self._lib.CAENHV_GetCrateMap.argtypes = [
-            c_int, POINTER(c_ushort), POINTER(POINTER(c_ushort)),
-            POINTER(POINTER(c_char_p)), POINTER(POINTER(c_char_p))
+            c_int,
+            POINTER(c_ushort),
+            POINTER(POINTER(c_ushort)),
+            POINTER(c_char_p),
+            POINTER(c_char_p),
+            POINTER(POINTER(c_ushort)),
+            POINTER(POINTER(c_ubyte)),
+            POINTER(POINTER(c_ubyte))
         ]
         self._lib.CAENHV_GetCrateMap.restype = c_int
 
@@ -111,19 +117,29 @@ class CaenHV:
     def get_crate_map(self):
         """
         Returns a dictionary mapping slot index to the number of channels it has.
-        Example: {0: 12, 1: 12, 3: 4} (slot 2 is empty)
         """
         if not self.is_connected:
             raise Exception("System not initialized")
 
+        # 8개의 인자를 받을 Ctypes 변수 준비
         c_nr_slot = c_ushort(0)
         c_nr_ch_list = POINTER(c_ushort)()
-        c_model_list = POINTER(c_char_p)()
-        c_desc_list = POINTER(c_char_p)()
+        c_model_list = c_char_p()
+        c_desc_list = c_char_p()
+        c_ser_num_list = POINTER(c_ushort)()
+        c_fmw_rel_min_list = POINTER(c_ubyte)()
+        c_fmw_rel_max_list = POINTER(c_ubyte)()
 
+        # C 라이브러리에 8개 인자 모두 전달
         result = self._lib.CAENHV_GetCrateMap(
-            self.handle.value, byref(c_nr_slot), byref(c_nr_ch_list),
-            byref(c_model_list), byref(c_desc_list)
+            self.handle.value,
+            byref(c_nr_slot),
+            byref(c_nr_ch_list),
+            byref(c_model_list),
+            byref(c_desc_list),
+            byref(c_ser_num_list),
+            byref(c_fmw_rel_min_list),
+            byref(c_fmw_rel_max_list)
         )
 
         if result != 0:
@@ -131,15 +147,27 @@ class CaenHV:
 
         crate_map = {}
         nr_slots = c_nr_slot.value
-        for i in range(nr_slots):
-            ch_count = c_nr_ch_list[i]
-            if ch_count > 0:
-                crate_map[i] = ch_count
 
-        # Free the memory allocated by the library
-        self._lib.CAENHV_Free(c_nr_ch_list)
-        self._lib.CAENHV_Free(c_model_list)
-        self._lib.CAENHV_Free(c_desc_list)
+        if nr_slots > 0 and bool(c_nr_ch_list):
+            for i in range(nr_slots):
+                ch_count = c_nr_ch_list[i]
+                if ch_count > 0:
+                    crate_map[i] = ch_count
+
+        # 라이브러리가 할당한 메모리 안전하게 해제 (메모리 누수 방지)
+        # c_char_p 등은 void 포인터로 캐스팅하여 C단 메모리 주소만 정확히 넘겨서 Free
+        if bool(c_nr_ch_list):
+            self._lib.CAENHV_Free(cast(c_nr_ch_list, c_void_p))
+        if c_model_list.value:
+            self._lib.CAENHV_Free(cast(c_model_list, c_void_p))
+        if c_desc_list.value:
+            self._lib.CAENHV_Free(cast(c_desc_list, c_void_p))
+        if bool(c_ser_num_list):
+            self._lib.CAENHV_Free(cast(c_ser_num_list, c_void_p))
+        if bool(c_fmw_rel_min_list):
+            self._lib.CAENHV_Free(cast(c_fmw_rel_min_list, c_void_p))
+        if bool(c_fmw_rel_max_list):
+            self._lib.CAENHV_Free(cast(c_fmw_rel_max_list, c_void_p))
 
         return crate_map
 
