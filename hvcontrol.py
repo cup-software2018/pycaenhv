@@ -2,15 +2,8 @@ import time
 import curses
 import sys
 import argparse
-from caenhv import CaenHV, SY4527, SY5527, N1470
+from hvclient import HVClient
 from hvchannel import HVChannel
-
-# change SY5527 to SY4527 or N1470 if needed
-CAENSYS = SY5527
-IPADDR = "192.168.0.152"
-
-USERNAME = "admin"
-PASSWORD = "admin"
 
 
 def load_hv_table(filepath):
@@ -34,50 +27,49 @@ def load_hv_table(filepath):
     return channels
 
 
-def power_on(hv, channels, group):
+def sync_hardware(client, channels, group="all"):
+    """
+    Push names and calculated I-limits to the server for channels in the table.
+    """
+    print(f"Synchronizing hardware settings for group '{group}'...")
     for ch in channels:
         if ch.group == group or group == "all":
-            hv.turn_on(ch.slot, ch.channel)
-
-
-def power_off(hv, channels, group):
-    for ch in channels:
-        if ch.group == group or group == "all":
-            hv.turn_off(ch.slot, ch.channel)
-
-
-def apply_hv_settings(hv, channels, group):
-    # Set the V0Set and I0Set parameters for channels based on the table
-    for ch in channels:
-        if ch.group == group or group == "all":
-            # Calculate current in uA (V in Volts / R in MOhms = I in uA)
+            # Calculate current limit in uA
             i_set = ch.hv_set / ch.r_val
-
-            # Add a 10% safety margin to prevent nuisance tripping (optional but recommended)
             i_limit = i_set * 1.1
 
-            # Apply Voltage, Current, and Name settings
-            hv.set_vset(ch.slot, ch.channel, ch.hv_set)
-            hv.set_iset(ch.slot, ch.channel, i_limit)
-            hv.set_name(ch.slot, ch.channel, ch.name)
+            # Push to server
+            client.send_command("set_name", int(ch.slot),
+                                int(ch.channel), ch.name)
+            client.send_command("set_vset", int(ch.slot),
+                                int(ch.channel), float(ch.hv_set))
+            client.send_command("set_iset", int(ch.slot),
+                                int(ch.channel), float(i_limit))
 
 
-def _monitor_loop(stdscr, hv, channels, group):
+def _monitor_loop(stdscr, client, channels, group):
     stdscr.nodelay(True)
     while True:
         stdscr.clear()
         stdscr.addstr(
             f"=== HV Monitoring: Group '{group}' (Press 'q' to stop) ===\n\n")
 
-        for ch in channels:
-            if ch.group == group or group == "all":
-                try:
-                    vcur = hv.get_vmon(ch.slot, ch.channel)
-                    icur = hv.get_imon(ch.slot, ch.channel)
-                    ch.set_current_value(vcur, icur)
-                    ch.print_info(stdscr)
-                except Exception as e:
-                    stdscr.addstr(f"Error reading {ch.name}: {e}\n")
+        # Pull latest raw data from server
+        raw_data = client.poll_data()
+
+        if raw_data:
+            # Match raw data with our table objects
+            for ch in channels:
+                if ch.group == group or group == "all":
+                    # Find matching slot/ch in raw data
+                    update = next((d for d in raw_data if d["slot"] == int(
+                        ch.slot) and d["channel"] == int(ch.channel)), None)
+                    if update:
+                        ch.set_current_value(update["vmon"], update["imon"])
+                        # This will use the name from the table
+                        ch.print_info(stdscr)
+        else:
+            stdscr.addstr("Waiting for data from server...\n")
 
         stdscr.refresh()
 
@@ -91,14 +83,14 @@ def _monitor_loop(stdscr, hv, channels, group):
         time.sleep(1)
 
 
-def monitoring(hv, channels, group):
-    curses.wrapper(_monitor_loop, hv, channels, group)
+def monitoring(client, channels, group):
+    curses.wrapper(_monitor_loop, client, channels, group)
 
 
 def main():
     # Setup command line argument parsing
     parser = argparse.ArgumentParser(
-        description="CAEN HV Control & Monitoring Tool")
+        description="CAEN HV Control & Monitoring Tool (Local Only)")
 
     # Positional argument: Action
     parser.add_argument("action", choices=['mon', 'on', 'off'],
@@ -112,48 +104,39 @@ def main():
 
     args = parser.parse_args()
 
-    # 1. Load the table
+    # 1. Load the local table
     fChannels = load_hv_table(args.table)
 
-    # 2. Validate group parameter
-    if args.group != "all":
-        group_exists = any(ch.group == args.group for ch in fChannels)
-        if not group_exists:
-            print(f"Error: Group '{args.group}' not found in {args.table}.")
-            sys.exit(1)
+    # 2. Connect to Client and Check Server
+    client = HVClient()
+    if not client.check_server():
+        print(f"Error: HV Server is not running. Please start hvserver.py first.")
+        sys.exit(1)
 
-    # 3. Connect and execute action
-    with CaenHV() as hv:
-        try:
-            hv.init_system(CAENSYS, IPADDR, USERNAME, PASSWORD)
+    # 3. Synchronize hardware with table settings
+    sync_hardware(client, fChannels, args.group)
 
-            # Automatically synchronize hardware with table settings (all channels)
-            print(
-                f"Synchronizing hardware with {args.table} for ALL groups...")
-            apply_hv_settings(hv, fChannels, "all")
-        except Exception as e:
-            print(f"Failed to connect or sync with {IPADDR}: {e}")
-            sys.exit(1)
+    # 4. Execute action
+    if args.action == 'mon':
+        monitoring(client, fChannels, args.group)
 
-        if args.action == 'mon':
-            # Start monitoring immediately
-            monitoring(hv, fChannels, args.group)
+    elif args.action == 'on':
+        print(f"Turning ON group '{args.group}'...")
+        for ch in fChannels:
+            if ch.group == args.group or args.group == "all":
+                client.send_command("turn_on", int(ch.slot), int(ch.channel))
+        print("Command sent. Switching to monitoring...")
+        time.sleep(1)
+        monitoring(client, fChannels, args.group)
 
-        elif args.action == 'on':
-            # Power ON and then switch to monitor
-            print(f"Turning ON group '{args.group}'...")
-            power_on(hv, fChannels, args.group)
-            print("Command sent. Switching to monitoring...")
-            time.sleep(1)  # Brief pause to show the message
-            monitoring(hv, fChannels, args.group)
-
-        elif args.action == 'off':
-            # Power OFF and then switch to monitor
-            print(f"Turning OFF group '{args.group}'...")
-            power_off(hv, fChannels, args.group)
-            print("Command sent. Switching to monitoring...")
-            time.sleep(1)  # Brief pause to show the message
-            monitoring(hv, fChannels, args.group)
+    elif args.action == 'off':
+        print(f"Turning OFF group '{args.group}'...")
+        for ch in fChannels:
+            if ch.group == args.group or args.group == "all":
+                client.send_command("turn_off", int(ch.slot), int(ch.channel))
+        print("Command sent. Switching to monitoring...")
+        time.sleep(1)
+        monitoring(client, fChannels, args.group)
 
 
 if __name__ == "__main__":

@@ -1,85 +1,83 @@
 # pycaenhv: Python Toolkit for CAEN High Voltage Systems
 
-A lightweight Python toolkit designed for efficient control and monitoring of CAEN High Voltage (HV) devices, specifically optimized for the **NDT1470** and SY series mainframes. This project wraps the official `CAENHVWrapper` C library using Python's `ctypes`, providing a high-level Pythonic interface and a robust Command Line Interface (CLI).
+A modernized, lightweight Python toolkit designed for efficient control and monitoring of CAEN High Voltage (HV) devices (SY series mainframes, NDT1470, etc.). 
+
+This project uses a **ZeroMQ-based Server-Client architecture** to allow multiple simultaneous connections, remote monitoring, and robust background operation.
 
 ## 1. Key Features
-- **Pythonic API**: Simple methods for voltage/current monitoring, power control, and parameter configuration.
-- **Automated Parameter Calculation**: Automatically calculates the current limit ($I_0Set$) based on target voltage ($V$) and resistance ($R$ in MΩ) using Ohm's Law ($I = V/R$), including a default 10% safety margin.
-- **Real-time Monitoring Dashboard**: High-performance terminal dashboard using the `curses` library to display real-time VMon, IMon, and channel status.
-- **Group-based Management**: Efficiently manage channels by grouping them to apply settings or power commands collectively.
+- **Server-Client Architecture**: A central server manages the hardware link, while multiple CLI/GUI clients can connect simultaneously.
+- **Table-less Server**: The server automatically discovers all available hardware slots and channels. Configuration (naming, grouping) is managed by the clients.
+- **Automated Parameter Calculation**: Clients automatically calculate current limits ($I_0Set$) based on target voltage ($V$) and resistance ($R$ in MΩ) using Ohm's Law ($I = V/R$), including a 10% safety margin.
+- **Daemon Support**: The server can run in the background with robust logging and signal handling.
+- **Multi-Client Monitoring**: ZeroMQ PUB/SUB pattern allows real-time telemetry broadcasting to all connected clients.
+- **GUI & CLI**: Professional terminal dashboard (CLI) and a flexible PySide6 GUI with remote connection support.
 
 ## 2. File Structure
-- `caenhv.py`: Core module for C library binding and hardware communication.
-- `hvchannel.py`: Data model for individual channel state and properties.
-- `hvcontrol.py`: CLI controller and entry point.
-- `hvcontrol_gui.py`: GUI controller and entry point.
-- `hv.table`: Configuration file containing channel mappings and HV parameters.
+- `caenhv.py`: Core hardware interface wrapping `CAENHVWrapper` via `ctypes`. Supports dynamic crate map discovery.
+- `hvserver.py`: Central background service. Manages the direct CAEN connection and ZeroMQ sockets.
+- `hvclient.py`: Shared communication library used by both CLI and GUI. Handles command timeouts and reconnection.
+- `hvcontrol.py`: CLI client (Local Only). Table-based monitoring and control.
+- `hvcontrol_gui.py`: GUI client (Local/Remote). Supports server address selection and interactive table editing.
+- `hvchannel.py`: Shared data model for channel parameters.
+- `hv.table`: (User-provided) Configuration file for channel-to-pmt mapping.
 
 ## 3. Prerequisites
 
 ### 1) CAEN HV Wrapper Library
-The official `CAENHVWrapper` library must be installed. Ensure the library path is added to your environment variables:
+Official `CAENHVWrapper` library must be installed and in your library path:
 ```bash
 export LD_LIBRARY_PATH=/path/to/caen/lib:$LD_LIBRARY_PATH
 ```
 
 ### 2) Python Dependencies
-To use the GUI, install PySide6:
+Requires `pyzmq` for communication and `PySide6` for the GUI:
 ```bash
-pip install PySide6
+pip install pyzmq PySide6
 ```
 
 ### 3) System Dependencies (OpenSSL 1.1)
-On modern Linux distributions (e.g., AlmaLinux 9, Ubuntu 22.04+), you may need OpenSSL 1.1 compatibility packages to resolve `libcrypto.so.1.1` errors.
-- **RHEL/Rocky/AlmaLinux**:
+CAEN libraries often require OpenSSL 1.1 compatibility:
+- **RHEL/Rocky/AlmaLinux**: `sudo dnf install compat-openssl11`
+
+## 4. Usage Flow
+
+### Step 1: Start the Server (`hvserver.py`)
+The server must be running to handle hardware communication.
+
+**Foreground Mode (with output):**
 ```bash
-sudo dnf install compat-openssl11
+python hvserver.py --ip [MAINFRAME_IP] --sys [SYS_TYPE]
 ```
 
-## 4. Usage
-
-### 0) Configuring the HV Table (`hv.table`)
-Create a text file to define your detector channels. (Space or tab-delimited)
-```text
-# name    slot   channel    HV      R(Mohm)  pmtid   group
-pmt_01    0      0          1914.0  2.2      1       10
-pmt_02    0      1          1850.0  2.2      2       10
-...
-```
-
-### 1) CLI Commands
-All actions support the `-g [group_name]` flag to target specific groups (default is `all`).
-
-1. **Apply Settings (Voltage & Current)**
-   Sets `V0Set` and `I0Set` for channels based on the table.
+**Daemon Mode (Background):**
 ```bash
-python hvcontrol.py set -g 10
+python hvserver.py --daemon --log hvserver.log
 ```
+*The server will automatically discover all slots and channels. Check `hvserver.log` for details.*
 
-2. **Power On & Monitor**
-   Turns on the power for the specified group and immediately enters the monitoring dashboard.
+### Step 2: Launch a Client
+
+#### CLI Client (Local Monitoring)
 ```bash
-python hvcontrol.py on -g 10
+# Monitor all channels in hv.table
+python hvcontrol.py mon -t hv.table
+
+# Power on a specific group
+python hvcontrol.py on -g 10 -t hv.table
 ```
 
-3. **Monitor Only**
-   Launches the real-time status dashboard. Press `q` to exit.
-```bash
-python hvcontrol.py mon
-```
-
-4. **Power Off**
-```bash
-python hvcontrol.py off -g all
-```
-
-### 2) Launch the GUI
+#### GUI Client (Remote/Local Monitoring)
 ```bash
 python hvcontrol_gui.py
 ```
+1. **Load Table**: Click **Browse...** to select your `hv.table`.
+2. **Set Server**: Enter the **Server Address** (IP or `localhost`).
+3. **Connect**: Click **Connect**. The client will synchronize your table settings (Names, I-limits) with the server.
+4. **Interactive Control**: 
+   - **Edit VSet**: Double-click "Set (V)" cells to change voltage (I-limit is auto-recalculated).
+   - **Toggle Power**: Double-click the "Status" cell of an individual channel.
+   - **Group Control**: Use the "Group Filter" and the Power ON/OFF buttons.
 
-#### GUI Workflow
-1. **Load Data**: Click **Browse...** to select your `hv.table` file. *(Note: You must load a table before connecting).*
-2. **Connect**: Enter the target IP address and click **Connect**. Monitoring will start automatically.
-3. **Filter & Control Group**: Select a specific group from the **Group Filter** dropdown. The selected channels will turn blue. Use the **Power ON / OFF** buttons to control only the filtered group.
-4. **Individual Control**: Double-click the **Status** cell (e.g., the word "OFF" or "ON") of a specific channel to safely toggle its power.
+## 5. Communications Protocol
+- **CMD Port (5555)**: ZMQ REQ/REP pattern for explicit commands (Turn ON, Set Voltage).
+- **PUB Port (5556)**: ZMQ PUB/SUB pattern for 1Hz real-time telemetry broadcasting.

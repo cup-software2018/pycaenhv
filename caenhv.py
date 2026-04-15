@@ -1,9 +1,11 @@
 import ctypes
-from ctypes import c_int, c_char_p, c_void_p, c_ushort, c_float, byref, POINTER
+from ctypes import c_int, c_char_p, c_void_p, c_ushort, c_float, c_short, byref, POINTER
 from ctypes.util import find_library
+import os
 
 # CAEN System Constants
-
+SY1527 = 0
+SY2527 = 1
 SY4527 = 2
 SY5527 = 3
 N1470 = 6
@@ -60,6 +62,17 @@ class CaenHV:
         self._lib.CAENHV_GetError.argtypes = [c_int]
         self._lib.CAENHV_GetError.restype = c_char_p
 
+        # Bind CAENHV_GetCrateMap
+        self._lib.CAENHV_GetCrateMap.argtypes = [
+            c_int, POINTER(c_ushort), POINTER(POINTER(c_ushort)),
+            POINTER(POINTER(c_char_p)), POINTER(POINTER(c_char_p))
+        ]
+        self._lib.CAENHV_GetCrateMap.restype = c_int
+
+        # Bind CAENHV_Free
+        self._lib.CAENHV_Free.argtypes = [c_void_p]
+        self._lib.CAENHV_Free.restype = c_int
+
     def init_system(self, system_type, ip_address, username="admin", password="admin"):
         # Convert strings to C char pointers
         c_ip = c_char_p(ip_address.encode('utf-8'))
@@ -94,6 +107,41 @@ class CaenHV:
         # Fetch the error message string from the library
         err_bytes = self._lib.CAENHV_GetError(self.handle.value)
         return err_bytes.decode('utf-8') if err_bytes else "Unknown Error"
+
+    def get_crate_map(self):
+        """
+        Returns a dictionary mapping slot index to the number of channels it has.
+        Example: {0: 12, 1: 12, 3: 4} (slot 2 is empty)
+        """
+        if not self.is_connected:
+            raise Exception("System not initialized")
+
+        c_nr_slot = c_ushort(0)
+        c_nr_ch_list = POINTER(c_ushort)()
+        c_model_list = POINTER(c_char_p)()
+        c_desc_list = POINTER(c_char_p)()
+
+        result = self._lib.CAENHV_GetCrateMap(
+            self.handle.value, byref(c_nr_slot), byref(c_nr_ch_list),
+            byref(c_model_list), byref(c_desc_list)
+        )
+
+        if result != 0:
+            raise Exception(f"Failed to get crate map: {self.get_error()}")
+
+        crate_map = {}
+        nr_slots = c_nr_slot.value
+        for i in range(nr_slots):
+            ch_count = c_nr_ch_list[i]
+            if ch_count > 0:
+                crate_map[i] = ch_count
+
+        # Free the memory allocated by the library
+        self._lib.CAENHV_Free(c_nr_ch_list)
+        self._lib.CAENHV_Free(c_model_list)
+        self._lib.CAENHV_Free(c_desc_list)
+
+        return crate_map
 
     def get_ch_param(self, slot, channel, param_name, param_type='float'):
         # Prepare inputs for a single channel

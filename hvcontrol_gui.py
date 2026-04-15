@@ -1,3 +1,4 @@
+# hvcontrol_gui.py
 
 import sys
 import os
@@ -9,15 +10,8 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
 
 # Import hardware control modules
-from caenhv import CaenHV, SY4527, SY5527, N1470
+from hvclient import HVClient
 from hvchannel import HVChannel
-
-# change SY5527 to SY4527 or N1470 if needed
-CAENSYS = SY5527
-IPADDR = "192.168.0.152"
-
-USERNAME = "admin"
-PASSWORD = "admin"
 
 
 def load_hv_table(filepath):
@@ -50,8 +44,8 @@ class HVControlApp(QMainWindow):
         self.setWindowTitle("CAEN HV Control & Monitor")
         self.resize(1000, 650)
 
-        # Initialize hardware connection and state variables
-        self.hv = CaenHV()
+        # Initialize client and state variables
+        self.client = HVClient()
         self.all_channels = []
         self.is_connected = False
 
@@ -66,7 +60,7 @@ class HVControlApp(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # --- Top Row: File Selection Area ---
+        # --- First Row: File Selection Area ---
         file_layout = QHBoxLayout()
         self.file_input = QLineEdit("hv.table")
         self.file_input.setReadOnly(True)
@@ -81,11 +75,16 @@ class HVControlApp(QMainWindow):
         # --- Second Row: Connection & Group Control Area ---
         conn_layout = QHBoxLayout()
 
-        self.ip_input = QLineEdit("192.168.0.152")
-        self.ip_input.setFixedWidth(120)
+        conn_layout.addWidget(QLabel("Server Address:"))
+        self.host_input = QLineEdit("localhost")
+        self.host_input.setFixedWidth(120)
+        conn_layout.addWidget(self.host_input)
 
         self.btn_connect = QPushButton("Connect")
         self.btn_connect.clicked.connect(self.toggle_connection)
+        conn_layout.addWidget(self.btn_connect)
+
+        conn_layout.addStretch()
 
         self.group_combo = QComboBox()
         self.group_combo.addItem("All")
@@ -100,10 +99,6 @@ class HVControlApp(QMainWindow):
         self.btn_off.clicked.connect(self.power_off_selected)
         self.btn_off.setEnabled(False)
 
-        conn_layout.addWidget(QLabel("IP Address:"))
-        conn_layout.addWidget(self.ip_input)
-        conn_layout.addWidget(self.btn_connect)
-        conn_layout.addStretch()
         conn_layout.addWidget(QLabel("Group Filter:"))
         conn_layout.addWidget(self.group_combo)
         conn_layout.addWidget(self.btn_on)
@@ -200,81 +195,86 @@ class HVControlApp(QMainWindow):
                     self, "Warning", "No channels loaded.\nPlease load a valid table file first.")
                 return
 
-            ip = self.ip_input.text()
-            try:
-                self.hv.init_system(CAENSYS, IPADDR, USERNAME, PASSWORD)
-                self.is_connected = True
+            # Update client destination if host changed
+            host = self.host_input.text().strip()
+            self.client.cmd_url = f"tcp://{host}:5555"
+            self.client.close()  # Close existing sockets before creating new ones
+            self.client = HVClient(
+                cmd_url=f"tcp://{host}:5555", sub_url=f"tcp://{host}:5556")
 
-                # Automatically synchronize hardware with table settings
-                self._sync_hardware_settings()
+            # Check if server is running
+            if self.client.check_server():
+                try:
+                    # Synchronize hardware with our table
+                    self._sync_hardware_settings()
 
-                # Update UI state
-                self.btn_connect.setText("Disconnect")
-                self.btn_on.setEnabled(True)
-                self.btn_off.setEnabled(True)
+                    self.is_connected = True
 
-                # Trigger an immediate update for better UI responsiveness before starting the timer
-                self.update_monitor()
-                self.monitor_timer.start(1000)
+                    # Update UI state
+                    self.btn_connect.setText("Disconnect")
+                    self.btn_on.setEnabled(True)
+                    self.btn_off.setEnabled(True)
 
-                QMessageBox.information(self, "Success", f"Connected to {ip}")
-            except Exception as e:
+                    self.monitor_timer.start(1000)
+                    QMessageBox.information(
+                        self, "Success", f"Connected and Synchronized with HV Server")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Sync Error", f"Failed to push settings to server:\n{e}")
+            else:
                 QMessageBox.critical(
-                    self, "Connection Error", f"Failed to connect:\n{e}")
+                    self, "Connection Error", f"HV Server is not running at {host}. Please start hvserver.py first.")
         else:
             self.monitor_timer.stop()
-            self.hv.deinit_system()
             self.is_connected = False
             self.btn_connect.setText("Connect")
             self.btn_on.setEnabled(False)
             self.btn_off.setEnabled(False)
 
     def on_item_changed(self, item):
-        """
-        Handles changes to table items (Name or Set Voltage).
-        """
+        if not self.is_connected:
+            return
+
         col = item.column()
         row = item.row()
 
-        # We only care about Name (1) and Set (V) (4)
         if col not in [1, 4]:
             return
 
-        # Retrieve the channel object
         ch = self.table.item(row, 0).data(Qt.UserRole)
         if not ch:
             return
 
-        # Block signals to prevent recursion when updating text programmatically
         self.table.blockSignals(True)
-
         try:
             new_val = item.text().strip()
 
             if col == 1:  # Name
                 ch.name = new_val
-                if self.is_connected:
-                    self.hv.set_name(ch.slot, ch.channel, ch.name)
+                self.client.send_command("set_name", int(
+                    ch.slot), int(ch.channel), new_val)
 
             elif col == 4:  # Set (V)
                 try:
                     v_set = float(new_val)
                     ch.hv_set = v_set
-
-                    if self.is_connected:
-                        # Re-calculate I0 limit based on new voltage
-                        i_limit = (ch.hv_set / ch.r_val) * 1.1
-                        self.hv.set_vset(ch.slot, ch.channel, ch.hv_set)
-                        self.hv.set_iset(ch.slot, ch.channel, i_limit)
+                    # Recalculate I-limit
+                    i_limit = (v_set / ch.r_val) * 1.1
+                    self.client.send_command("set_vset", int(
+                        ch.slot), int(ch.channel), v_set)
+                    self.client.send_command("set_iset", int(
+                        ch.slot), int(ch.channel), i_limit)
                 except ValueError:
-                    # Restore old value if input is invalid
                     item.setText(f"{ch.hv_set:.2f}")
                     QMessageBox.warning(
                         self, "Invalid Input", "Please enter a valid number for Voltage.")
 
+        except TimeoutError as e:
+            QMessageBox.warning(self, "Timeout Error",
+                                f"Server communication timeout:\n{e}")
         except Exception as e:
             QMessageBox.warning(self, "Sync Error",
-                                f"Failed to update hardware:\n{e}")
+                                f"Failed to update server:\n{e}")
 
         self.table.blockSignals(False)
 
@@ -295,14 +295,19 @@ class HVControlApp(QMainWindow):
 
         if reply == QMessageBox.Yes:
             try:
-                current_pw = self.hv.get_ch_param(
-                    ch.slot, ch.channel, "Pw", "int")
-                if current_pw == 1:
-                    self.hv.turn_off(ch.slot, ch.channel)
+                # Check current status from server data
+                status = self.client.send_command("get_ch_param", int(
+                    ch.slot), int(ch.channel), "Status", "int")
+                is_on = status & (1 << 0)
+                if is_on:
+                    self.client.send_command(
+                        "turn_off", int(ch.slot), int(ch.channel))
                 else:
-                    self.hv.turn_on(ch.slot, ch.channel)
-                # Force immediate update to reflect the command response in UI
-                self.update_monitor()
+                    self.client.send_command(
+                        "turn_on", int(ch.slot), int(ch.channel))
+            except TimeoutError as e:
+                QMessageBox.warning(self, "Timeout Error",
+                                    f"Server communication timeout:\n{e}")
             except Exception as e:
                 QMessageBox.warning(self, "Control Error",
                                     f"Failed to toggle power:\n{e}")
@@ -311,84 +316,111 @@ class HVControlApp(QMainWindow):
         if not self.is_connected:
             return
 
-        for row in range(self.table.rowCount()):
-            ch = self.table.item(row, 0).data(Qt.UserRole)
-            try:
-                vcur = self.hv.get_vmon(ch.slot, ch.channel)
-                icur = self.hv.get_imon(ch.slot, ch.channel)
+        try:
+            data = self.client.poll_data()
+            if not data:
+                return
 
-                status_val = self.hv.get_ch_param(
-                    ch.slot, ch.channel, "Status", "int")
+            # Map the incoming data to table rows
+            for row in range(self.table.rowCount()):
+                ch = self.table.item(row, 0).data(Qt.UserRole)
+                # Find matching channel in published data
+                ch_update = next((d for d in data if d["slot"] == int(
+                    ch.slot) and d["channel"] == int(ch.channel)), None)
 
-                is_on = status_val & (1 << 0)
-                is_ramping = status_val & ((1 << 1) | (1 << 2))
-                is_ovc = status_val & (1 << 3)
-                is_trip = status_val & (1 << 8)
+                if ch_update:
+                    vcur = ch_update["vmon"]
+                    icur = ch_update["imon"]
+                    status_val = ch_update["status"]
 
-                if is_ovc or is_trip:
-                    state_str = "TRIP"
-                    state_color = QColor("red")
-                elif is_ramping:
-                    state_str = "RAMPING"
-                    state_color = QColor("darkorange")
-                elif is_on:
-                    state_str = "ON"
-                    state_color = QColor("green")
-                else:
-                    state_str = "OFF"
-                    state_color = QColor("gray")
+                    is_on = status_val & (1 << 0)
+                    is_ramping = status_val & ((1 << 1) | (1 << 2))
+                    is_ovc = status_val & (1 << 3)
+                    is_trip = status_val & (1 << 8)
 
-                self.table.item(row, 5).setText(f"{vcur:.2f}")
-                self.table.item(row, 6).setText(f"{icur:.2f}")
+                    if is_ovc or is_trip:
+                        state_str = "TRIP"
+                        state_color = QColor("red")
+                    elif is_ramping:
+                        state_str = "RAMPING"
+                        state_color = QColor("darkorange")
+                    elif is_on:
+                        state_str = "ON"
+                        state_color = QColor("green")
+                    else:
+                        state_str = "OFF"
+                        state_color = QColor("gray")
 
-                status_item = self.table.item(row, 7)
-                status_item.setText(state_str)
-                status_item.setForeground(state_color)
-            except Exception:
-                pass
+                    self.table.item(row, 5).setText(f"{vcur:.2f}")
+                    self.table.item(row, 6).setText(f"{icur:.2f}")
+
+                    status_item = self.table.item(row, 7)
+                    status_item.setText(state_str)
+                    status_item.setForeground(state_color)
+
+        except RuntimeError as e:
+            # Handle server shutdown message
+            self.monitor_timer.stop()
+            self.is_connected = False
+            self.btn_connect.setText("Connect")
+            QMessageBox.critical(self, "Server Disconnected", str(e))
+        except Exception as e:
+            # Handle other potential server disconnections
+            self.monitor_timer.stop()
+            self.is_connected = False
+            self.btn_connect.setText("Connect")
+            QMessageBox.critical(self, "Server Lost",
+                                 f"Lost connection to server:\n{e}")
 
     def power_on_selected(self):
         if not self.is_connected:
             return
         selected_group = self.group_combo.currentText()
-        for row in range(self.table.rowCount()):
-            ch = self.table.item(row, 0).data(Qt.UserRole)
-            if selected_group == "All" or ch.group == selected_group:
-                self.hv.turn_on(ch.slot, ch.channel)
-        self.update_monitor()
+        try:
+            for row in range(self.table.rowCount()):
+                ch = self.table.item(row, 0).data(Qt.UserRole)
+                if selected_group == "All" or ch.group == selected_group:
+                    self.client.send_command(
+                        "turn_on", int(ch.slot), int(ch.channel))
+        except Exception as e:
+            QMessageBox.warning(self, "Control Error",
+                                f"Failed during group power ON:\n{e}")
 
     def power_off_selected(self):
         if not self.is_connected:
             return
         selected_group = self.group_combo.currentText()
-        for row in range(self.table.rowCount()):
-            ch = self.table.item(row, 0).data(Qt.UserRole)
-            if selected_group == "All" or ch.group == selected_group:
-                self.hv.turn_off(ch.slot, ch.channel)
-        self.update_monitor()
+        try:
+            for row in range(self.table.rowCount()):
+                ch = self.table.item(row, 0).data(Qt.UserRole)
+                if selected_group == "All" or ch.group == selected_group:
+                    self.client.send_command(
+                        "turn_off", int(ch.slot), int(ch.channel))
+        except Exception as e:
+            QMessageBox.warning(self, "Control Error",
+                                f"Failed during group power OFF:\n{e}")
 
     def _sync_hardware_settings(self):
         """
-        Automatically applies V0Set, I0Set, and Name settings to all loaded channels.
+        Pushes current names, voltages, and calculated I-limits to the server.
         """
-        try:
-            for ch in self.all_channels:
-                # Calculate current limit in uA
-                i_set = ch.hv_set / ch.r_val
-                i_limit = i_set * 1.1
+        for ch in self.all_channels:
+            # Calculate current limit in uA
+            i_set = ch.hv_set / ch.r_val
+            i_limit = i_set * 1.1
 
-                # Apply settings to hardware
-                self.hv.set_vset(ch.slot, ch.channel, ch.hv_set)
-                self.hv.set_iset(ch.slot, ch.channel, i_limit)
-                self.hv.set_name(ch.slot, ch.channel, ch.name)
-        except Exception as e:
-            # Re-raise so the caller can handle/show the error
-            raise Exception(f"Hardware synchronization failed: {e}")
+            # Push to server
+            self.client.send_command("set_name", int(
+                ch.slot), int(ch.channel), ch.name)
+            self.client.send_command("set_vset", int(
+                ch.slot), int(ch.channel), float(ch.hv_set))
+            self.client.send_command("set_iset", int(
+                ch.slot), int(ch.channel), float(i_limit))
 
     def closeEvent(self, event):
         if self.is_connected:
             self.monitor_timer.stop()
-            self.hv.deinit_system()
+            self.client.close()
         event.accept()
 
 
