@@ -253,10 +253,7 @@ class HVControlApp(QMainWindow):
             if col == 1:  # Name
                 ch.name = new_val
                 if self.is_connected:
-                    try:
-                        self.hv.set_name(ch.slot, ch.channel, ch.name)
-                    except Exception:
-                        pass  # Name not supported on this board
+                    self.hv.set_name(ch.slot, ch.channel, ch.name)
 
             elif col == 4:  # Set (V)
                 try:
@@ -379,15 +376,10 @@ class HVControlApp(QMainWindow):
                 i_set = ch.hv_set / ch.r_val
                 i_limit = i_set * 1.1
 
-                # Apply Voltage and Current settings (critical)
+                # Apply Voltage, Current, and Name settings
                 self.hv.set_vset(ch.slot, ch.channel, ch.hv_set)
                 self.hv.set_iset(ch.slot, ch.channel, i_limit)
-
-                # Apply Name (best-effort: some boards do not support this)
-                try:
-                    self.hv.set_name(ch.slot, ch.channel, ch.name)
-                except Exception:
-                    pass
+                self.hv.set_name(ch.slot, ch.channel, ch.name)
         except Exception as e:
             # Re-raise so the caller can handle/show the error
             raise Exception(f"Hardware synchronization failed: {e}")

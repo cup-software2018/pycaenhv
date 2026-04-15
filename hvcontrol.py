@@ -55,15 +55,10 @@ def apply_hv_settings(hv, channels, group):
             # Add a 10% safety margin to prevent nuisance tripping
             i_limit = i_set * 1.1
 
-            # Apply Voltage and Current settings (critical)
+            # Apply Voltage, Current, and Name settings
             hv.set_vset(ch.slot, ch.channel, ch.hv_set)
             hv.set_iset(ch.slot, ch.channel, i_limit)
-
-            # Apply Name (best-effort: some boards do not support this)
-            try:
-                hv.set_name(ch.slot, ch.channel, ch.name)
-            except Exception:
-                pass  # Name setting not supported on this board; skip silently
+            hv.set_name(ch.slot, ch.channel, ch.name)
 
 
 def _monitor_loop(stdscr, hv, channels, group):
