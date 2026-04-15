@@ -32,6 +32,8 @@ class HVServer:
         
         self.running = True
         self.monitor_thread = None
+        self.start_time = time.monotonic()  # for uptime tracking
+        self.error_count = 0                # hardware error counter
 
     def start(self):
         try:
@@ -90,6 +92,7 @@ class HVServer:
                 self.pub_socket.send_json({"type": "update", "data": data_list})
                 
             except Exception as e:
+                self.error_count += 1
                 logging.error(f"Hardware communication lost during monitor: {e}")
                 self.shutdown(f"Hardware lost: {e}")
                 break
@@ -117,7 +120,14 @@ class HVServer:
     def _handle_request(self, method, params):
         if method == "ping":
             return "pong"
-        
+
+        if method == "get_server_health":
+            return {
+                "uptime_s":     time.monotonic() - self.start_time,
+                "channel_count": len(self.channels),
+                "error_count":  self.error_count,
+            }
+
         if method == "get_channels":
             return self.channels
 

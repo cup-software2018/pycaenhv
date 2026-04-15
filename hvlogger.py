@@ -72,11 +72,23 @@ def db_write_server_health(db, record: dict):
     Write hvserver health metrics to the time-series DB.
 
     record dict contains:
-        timestamp  (datetime, UTC)
-        alive      (bool)   True if server responded
-        ping_ms    (float)  round-trip time in milliseconds (NaN if dead)
+        timestamp      (datetime, UTC)
+        alive          (bool)   True if server responded
+        ping_ms        (float)  round-trip time in milliseconds (NaN if dead)
+        uptime_s       (float)  server process uptime in seconds (NaN if dead)
+        channel_count  (int)    number of discovered hardware channels (0 if dead)
+        error_count    (int)    cumulative hardware errors on the server (0 if dead)
     """
     # TODO: implement server health DB write
+    # Example (InfluxDB):
+    #   p = (Point("hv_server")
+    #        .field("alive",         int(record["alive"]))
+    #        .field("ping_ms",       record["ping_ms"])
+    #        .field("uptime_s",      record["uptime_s"])
+    #        .field("channel_count", record["channel_count"])
+    #        .field("error_count",   record["error_count"])
+    #        .time(record["timestamp"]))
+    #   write_api.write(bucket=BUCKET, record=p)
     pass
 
 
@@ -182,12 +194,28 @@ def collect_and_write(client: HVClient, db,
     # --- 1. Server health ---
     alive, ping_ms = ping_server(client)
     server_record = {
-        "timestamp": now,
-        "alive":     alive,
-        "ping_ms":   ping_ms,
+        "timestamp":     now,
+        "alive":         alive,
+        "ping_ms":       ping_ms,
+        "uptime_s":      float('nan'),
+        "channel_count": 0,
+        "error_count":   0,
     }
     if alive:
-        logging.info(f"Server alive  ping={ping_ms:.1f} ms")
+        try:
+            srv_health = client.send_command("get_server_health")
+            server_record["uptime_s"]      = srv_health["uptime_s"]
+            server_record["channel_count"] = srv_health["channel_count"]
+            server_record["error_count"]   = srv_health["error_count"]
+            logging.info(
+                f"Server alive  ping={ping_ms:.1f} ms  "
+                f"uptime={srv_health['uptime_s']:.0f}s  "
+                f"channels={srv_health['channel_count']}  "
+                f"errors={srv_health['error_count']}"
+            )
+        except Exception as e:
+            logging.warning(f"get_server_health failed: {e}")
+            logging.info(f"Server alive  ping={ping_ms:.1f} ms")
     else:
         logging.warning("Server NOT responding!")
     db_write_server_health(db, server_record)
