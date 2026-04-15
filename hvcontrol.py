@@ -52,13 +52,18 @@ def apply_hv_settings(hv, channels, group):
             # Calculate current in uA (V in Volts / R in MOhms = I in uA)
             i_set = ch.hv_set / ch.r_val
 
-            # Add a 10% safety margin to prevent nuisance tripping (optional but recommended)
+            # Add a 10% safety margin to prevent nuisance tripping
             i_limit = i_set * 1.1
 
-            # Apply Voltage, Current, and Name settings
+            # Apply Voltage and Current settings (critical)
             hv.set_vset(ch.slot, ch.channel, ch.hv_set)
             hv.set_iset(ch.slot, ch.channel, i_limit)
-            hv.set_name(ch.slot, ch.channel, ch.name)
+
+            # Apply Name (best-effort: some boards do not support this)
+            try:
+                hv.set_name(ch.slot, ch.channel, ch.name)
+            except Exception:
+                pass  # Name setting not supported on this board; skip silently
 
 
 def _monitor_loop(stdscr, hv, channels, group):
