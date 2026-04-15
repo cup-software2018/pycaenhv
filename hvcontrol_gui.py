@@ -10,6 +10,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
 
 # Import hardware control modules
+import hvconfig
 from hvclient import HVClient
 from hvchannel import HVChannel
 
@@ -197,10 +198,11 @@ class HVControlApp(QMainWindow):
 
             # Update client destination if host changed
             host = self.host_input.text().strip()
-            self.client.cmd_url = f"tcp://{host}:5555"
+            self.client.cmd_url = f"tcp://{host}:{hvconfig.CMD_PORT}"
             self.client.close()  # Close existing sockets before creating new ones
             self.client = HVClient(
-                cmd_url=f"tcp://{host}:5555", sub_url=f"tcp://{host}:5556")
+                cmd_url=f"tcp://{host}:{hvconfig.CMD_PORT}", 
+                sub_url=f"tcp://{host}:{hvconfig.PUB_PORT}")
 
             # Check if server is running
             if self.client.check_server():

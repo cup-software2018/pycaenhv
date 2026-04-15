@@ -2,12 +2,16 @@
 import zmq
 import json
 import time
+import hvconfig
 
 
 class HVClient:
-    def __init__(self, cmd_url="tcp://localhost:5555", sub_url="tcp://localhost:5556"):
+    def __init__(self, cmd_url=None, sub_url=None):
+        host = "localhost"
+        self.cmd_url = cmd_url if cmd_url else f"tcp://{host}:{hvconfig.CMD_PORT}"
+        sub_url = sub_url if sub_url else f"tcp://{host}:{hvconfig.PUB_PORT}"
+
         # Save URL for reconnection in case of timeout
-        self.cmd_url = cmd_url
         self.context = zmq.Context()
         self.cmd_socket = self.context.socket(zmq.REQ)
         self.cmd_socket.connect(self.cmd_url)

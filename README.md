@@ -18,7 +18,7 @@ This project uses a **ZeroMQ-based Server-Client architecture** to allow multipl
 - `hvclient.py`: Shared communication library used by both CLI and GUI. Handles command timeouts and reconnection.
 - `hvcontrol.py`: CLI client (Local Only). Table-based monitoring and control.
 - `hvcontrol_gui.py`: GUI client (Local/Remote). Supports server address selection and interactive table editing.
-- `hvchannel.py`: Shared data model for channel parameters.
+- `hvconfig.py`: Centralized configuration (defaults for IP, Ports, and Credentials).
 - `hv.table`: (User-provided) Configuration file for channel-to-pmt mapping.
 
 ## 3. Prerequisites
@@ -81,3 +81,21 @@ python hvcontrol_gui.py
 ## 5. Communications Protocol
 - **CMD Port (5555)**: ZMQ REQ/REP pattern for explicit commands (Turn ON, Set Voltage).
 - **PUB Port (5556)**: ZMQ PUB/SUB pattern for 1Hz real-time telemetry broadcasting.
+
+## 6. Configuration Management
+To avoid modifying source code for site-specific settings, `hvconfig.py` manages all defaults.
+
+### Using `config.json`
+You can create a `config.json` in the project root to override any default settings without touching the Python code. If this file exists, it is loaded automatically.
+
+**Example `config.json`:**
+```json
+{
+  "IP_ADDRESS": "192.168.0.152",
+  "SYSTEM_TYPE": 3,
+  "CMD_PORT": 5555,
+  "PUB_PORT": 5556,
+  "LOG_FILE": "hvserver.log"
+}
+```
+*(System Type: 2 for SY4527, 3 for SY5527, 6 for N1470)*

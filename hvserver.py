@@ -9,16 +9,12 @@ import logging
 import argparse
 from caenhv import CaenHV, SY4527, SY5527, N1470
 
-# --- Default Constants ---
-DEFAULT_IP = "192.168.0.152"
-DEFAULT_SYS = SY5527
-DEFAULT_CMD_PORT = 5555
-DEFAULT_PUB_PORT = 5556
-LOG_FILE = "hvserver.log"
-PID_FILE = "hvserver.pid"
+import hvconfig
+from caenhv import CaenHV
 
 class HVServer:
-    def __init__(self, ip=DEFAULT_IP, sys_type=DEFAULT_SYS, cmd_port=DEFAULT_CMD_PORT, pub_port=DEFAULT_PUB_PORT):
+    def __init__(self, ip=hvconfig.IP_ADDRESS, sys_type=hvconfig.SYSTEM_TYPE, 
+                 cmd_port=hvconfig.CMD_PORT, pub_port=hvconfig.PUB_PORT):
         self.ip = ip
         self.sys_type = sys_type
         self.cmd_port = cmd_port
@@ -41,7 +37,7 @@ class HVServer:
     def start(self):
         try:
             logging.info(f"Connecting to CAEN HV at {self.ip}...")
-            self.hv.init_system(self.sys_type, self.ip, "admin", "admin")
+            self.hv.init_system(self.sys_type, self.ip, hvconfig.USERNAME, hvconfig.PASSWORD)
             
             # Hardware discovery
             logging.info("Discovering hardware layout...")
@@ -165,12 +161,12 @@ class HVServer:
         logging.info("Server process terminated.")
         
         # Cleanup PID file if we are the owner
-        if os.path.exists(PID_FILE):
+        if os.path.exists(hvconfig.PID_FILE):
             try:
-                with open(PID_FILE, 'r') as f:
+                with open(hvconfig.PID_FILE, 'r') as f:
                     pid = int(f.read().strip())
                 if pid == os.getpid():
-                    os.remove(PID_FILE)
+                    os.remove(hvconfig.PID_FILE)
             except:
                 pass
         
@@ -210,13 +206,13 @@ def daemonize():
 
 def main():
     parser = argparse.ArgumentParser(description="CAEN HV Background Server (Daemon)")
-    parser.add_argument("--ip", default=DEFAULT_IP, help=f"CAEN Mainframe IP (default: {DEFAULT_IP})")
-    parser.add_argument("--sys", type=int, default=DEFAULT_SYS, help=f"System type 2=SY4527, 3=SY5527 (default: {DEFAULT_SYS})")
-    parser.add_argument("--cmd-port", type=int, default=DEFAULT_CMD_PORT, help="Command port (REP)")
-    parser.add_argument("--pub-port", type=int, default=DEFAULT_PUB_PORT, help="Telemetry port (PUB)")
+    parser.add_argument("--ip", default=hvconfig.IP_ADDRESS, help=f"CAEN Mainframe IP (default: {hvconfig.IP_ADDRESS})")
+    parser.add_argument("--sys", type=int, default=hvconfig.SYSTEM_TYPE, help=f"System type 2=SY4527, 3=SY5527 (default: {hvconfig.SYSTEM_TYPE})")
+    parser.add_argument("--cmd-port", type=int, default=hvconfig.CMD_PORT, help="Command port (REP)")
+    parser.add_argument("--pub-port", type=int, default=hvconfig.PUB_PORT, help="Telemetry port (PUB)")
     parser.add_argument("--daemon", action="store_true", help="Run in background (daemonize)")
-    parser.add_argument("--log", default=LOG_FILE, help=f"Log file path (default: {LOG_FILE})")
-    parser.add_argument("--pid", default=PID_FILE, help=f"PID file path (default: {PID_FILE})")
+    parser.add_argument("--log", default=hvconfig.LOG_FILE, help=f"Log file path (default: {hvconfig.LOG_FILE})")
+    parser.add_argument("--pid", default=hvconfig.PID_FILE, help=f"PID file path (default: {hvconfig.PID_FILE})")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()

@@ -4,6 +4,7 @@ import sys
 import argparse
 from hvclient import HVClient
 from hvchannel import HVChannel
+import hvconfig
 
 
 def load_hv_table(filepath):
@@ -99,8 +100,8 @@ def main():
     # Optional arguments
     parser.add_argument("-g", "--group", default="all",
                         help="Target group name from the table (default: all)")
-    parser.add_argument("-t", "--table", default="hv_table.txt",
-                        help="Path to the HV configuration table file")
+    parser.add_argument("-t", "--table", default="hv.table",
+                        help=f"Path to the HV configuration table file (default: hv.table)")
 
     args = parser.parse_args()
 
