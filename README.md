@@ -1,85 +1,99 @@
-# pycaenhv: Python Toolkit for CAEN High Voltage Systems
+# pycaenhv v1.0: Python Toolkit for CAEN High Voltage Systems
 
-A lightweight Python toolkit designed for efficient control and monitoring of CAEN High Voltage (HV) devices, specifically optimized for the **NDT1470** and SY series mainframes. This project wraps the official `CAENHVWrapper` C library using Python's `ctypes`, providing a high-level Pythonic interface and a robust Command Line Interface (CLI).
+A lightweight Python toolkit for direct control and monitoring of CAEN High Voltage (HV) devices (SY series mainframes, NDT1470, etc.).
+
+This version provides **direct hardware access** via the official `CAENHVWrapper` C library using Python's `ctypes`.
 
 ## 1. Key Features
-- **Pythonic API**: Simple methods for voltage/current monitoring, power control, and parameter configuration.
-- **Automated Parameter Calculation**: Automatically calculates the current limit ($I_0Set$) based on target voltage ($V$) and resistance ($R$ in MΩ) using Ohm's Law ($I = V/R$), including a default 10% safety margin.
-- **Real-time Monitoring Dashboard**: High-performance terminal dashboard using the `curses` library to display real-time VMon, IMon, and channel status.
-- **Group-based Management**: Efficiently manage channels by grouping them to apply settings or power commands collectively.
+- **Direct Hardware Access**: CLI and GUI communicate directly with the CAEN mainframe.
+- **Centralized Configuration**: Hardware settings (IP, credentials, system type) are managed in `hvconfig.py` with optional `config.json` override.
+- **Automated Parameter Calculation**: Automatically calculates current limits ($I_0Set$) from target voltage ($V$) and resistance ($R$ in MΩ) via Ohm's Law, including a 10% safety margin.
+- **Group-based Management**: Apply settings and power commands to named channel groups.
+- **Real-time Monitoring**: Terminal dashboard (CLI) and PySide6 GUI for live VMon/IMon display.
+- **Hardware Diagnostic Tool**: `caenprobe.py` for quickly inspecting active slots and channels.
 
 ## 2. File Structure
-- `caenhv.py`: Core module for C library binding and hardware communication.
-- `hvchannel.py`: Data model for individual channel state and properties.
-- `hvcontrol.py`: CLI controller and entry point.
-- `hvcontrol_gui.py`: GUI controller and entry point.
-- `hv.table`: Configuration file containing channel mappings and HV parameters.
+- `caenhv.py`: Core hardware interface wrapping `CAENHVWrapper` via `ctypes`. Supports dynamic crate map discovery.
+- `hvconfig.py`: Centralized configuration (IP, credentials, ports, system type). Supports `config.json` overrides.
+- `hvcontrol.py`: CLI for table-based monitoring and control.
+- `hvcontrol_gui.py`: GUI for interactive monitoring and control.
+- `hvchannel.py`: Shared data model for individual channel parameters.
+- `caenprobe.py`: Standalone diagnostic tool to inspect active slots and channels.
+- `hv.table`: (User-provided) Configuration file for channel-to-detector mapping.
 
 ## 3. Prerequisites
 
 ### 1) CAEN HV Wrapper Library
-The official `CAENHVWrapper` library must be installed. Ensure the library path is added to your environment variables:
+Official `CAENHVWrapper` library must be installed and in your library path:
 ```bash
 export LD_LIBRARY_PATH=/path/to/caen/lib:$LD_LIBRARY_PATH
 ```
 
 ### 2) Python Dependencies
-To use the GUI, install PySide6:
+Requires `PySide6` for the GUI:
 ```bash
 pip install PySide6
 ```
 
 ### 3) System Dependencies (OpenSSL 1.1)
-On modern Linux distributions (e.g., AlmaLinux 9, Ubuntu 22.04+), you may need OpenSSL 1.1 compatibility packages to resolve `libcrypto.so.1.1` errors.
-- **RHEL/Rocky/AlmaLinux**:
-```bash
-sudo dnf install compat-openssl11
+CAEN libraries often require OpenSSL 1.1 compatibility:
+- **RHEL/Rocky/AlmaLinux**: `sudo dnf install compat-openssl11`
+
+## 4. Configuration
+
+### `hvconfig.py` and `config.json`
+All hardware connection settings are managed in `hvconfig.py`. To customize without modifying source code, create a `config.json` in the project root:
+
+```json
+{
+  "IP_ADDRESS": "192.168.0.152",
+  "SYSTEM_TYPE": 3,
+  "USERNAME": "admin",
+  "PASSWORD": "admin"
+}
 ```
+*(System Type: 2 for SY4527, 3 for SY5527, 6 for N1470)*
 
-## 4. Usage
-
-### 0) Configuring the HV Table (`hv.table`)
-Create a text file to define your detector channels. (Space or tab-delimited)
+### `hv.table` Format
+Create a space-delimited text file to map your detector channels:
 ```text
-# name    slot   channel    HV      R(Mohm)  pmtid   group
+# name    slot   channel    HV(V)   R(MOhm)  pmtid   group
 pmt_01    0      0          1914.0  2.2      1       10
 pmt_02    0      1          1850.0  2.2      2       10
-...
 ```
 
-### 1) CLI Commands
-All actions support the `-g [group_name]` flag to target specific groups (default is `all`).
+## 5. Usage
 
-1. **Apply Settings (Voltage & Current)**
-   Sets `V0Set` and `I0Set` for channels based on the table.
+### Probe Hardware (Check Slots & Channels)
 ```bash
-python hvcontrol.py set -g 10
+python caenprobe.py
 ```
 
-2. **Power On & Monitor**
-   Turns on the power for the specified group and immediately enters the monitoring dashboard.
+### CLI (`hvcontrol.py`)
+On startup, the CLI automatically connects, applies all table settings (`V0Set`, `I0Set`, `Name`), and then performs the requested action.
+
 ```bash
-python hvcontrol.py on -g 10
-```
+# Monitor all channels
+python hvcontrol.py mon -t hv.table
 
-3. **Monitor Only**
-   Launches the real-time status dashboard. Press `q` to exit.
-```bash
-python hvcontrol.py mon
-```
+# Monitor a specific group
+python hvcontrol.py mon -g 10 -t hv.table
 
-4. **Power Off**
-```bash
-python hvcontrol.py off -g all
-```
+# Power ON a group, then switch to monitoring
+python hvcontrol.py on -g 10 -t hv.table
 
-### 2) Launch the GUI
+# Power OFF all channels, then switch to monitoring
+python hvcontrol.py off -t hv.table
+```
+*Press `q` to exit the monitoring dashboard.*
+
+### GUI (`hvcontrol_gui.py`)
 ```bash
 python hvcontrol_gui.py
 ```
-
-#### GUI Workflow
-1. **Load Data**: Click **Browse...** to select your `hv.table` file. *(Note: You must load a table before connecting).*
-2. **Connect**: Enter the target IP address and click **Connect**. Monitoring will start automatically.
-3. **Filter & Control Group**: Select a specific group from the **Group Filter** dropdown. The selected channels will turn blue. Use the **Power ON / OFF** buttons to control only the filtered group.
-4. **Individual Control**: Double-click the **Status** cell (e.g., the word "OFF" or "ON") of a specific channel to safely toggle its power.
+1. **Load Table**: Click **Browse...** to select your `hv.table` file.
+2. **Connect**: Enter the mainframe IP and click **Connect**. Settings are automatically synchronized.
+3. **Interactive Control**:
+   - **Edit V/Name**: Double-click **Name** or **Set (V)** cells to modify values. Changes are applied to hardware immediately.
+   - **Toggle Power**: Double-click the **Status** cell of a channel to toggle it ON/OFF.
+   - **Group Control**: Use the **Group Filter** dropdown and the **Power ON / OFF** buttons.
