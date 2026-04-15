@@ -211,8 +211,9 @@ def main():
     parser.add_argument("--cmd-port", type=int, default=hvconfig.CMD_PORT, help="Command port (REP)")
     parser.add_argument("--pub-port", type=int, default=hvconfig.PUB_PORT, help="Telemetry port (PUB)")
     parser.add_argument("--daemon", action="store_true", help="Run in background (daemonize)")
-    parser.add_argument("--log", default=hvconfig.LOG_FILE, help=f"Log file path (default: {hvconfig.LOG_FILE})")
-    parser.add_argument("--pid", default=hvconfig.PID_FILE, help=f"PID file path (default: {hvconfig.PID_FILE})")
+    parser.add_argument("--log", default=hvconfig.SERVER_LOG_FILE, help=f"Log file path (default: {hvconfig.SERVER_LOG_FILE})")
+    parser.add_argument("--pid", default=hvconfig.SERVER_PID_FILE, help=f"PID file path (default: {hvconfig.SERVER_PID_FILE})")
+
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()

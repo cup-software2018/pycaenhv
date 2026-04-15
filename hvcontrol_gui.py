@@ -201,7 +201,7 @@ class HVControlApp(QMainWindow):
             self.client.cmd_url = f"tcp://{host}:{hvconfig.CMD_PORT}"
             self.client.close()  # Close existing sockets before creating new ones
             self.client = HVClient(
-                cmd_url=f"tcp://{host}:{hvconfig.CMD_PORT}", 
+                cmd_url=f"tcp://{host}:{hvconfig.CMD_PORT}",
                 sub_url=f"tcp://{host}:{hvconfig.PUB_PORT}")
 
             # Check if server is running

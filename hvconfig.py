@@ -2,46 +2,91 @@ import json
 import os
 from caenhv import SY4527, SY5527
 
-# --- Default System Settings ---
+# ===========================================================================
+# Hardware Connection Settings
+# ===========================================================================
 IP_ADDRESS = "172.16.2.51"
 SYSTEM_TYPE = SY4527
 USERNAME = "admin"
 PASSWORD = "admin"
 
-# --- Communication Settings ---
-CMD_PORT = 5555
-PUB_PORT = 5556
+# ===========================================================================
+# ZeroMQ Communication Ports (hvserver ↔ clients)
+# ===========================================================================
+CMD_PORT = 5555   # REQ/REP command channel
+PUB_PORT = 5556   # PUB/SUB telemetry channel
 
-# --- Service Settings ---
-LOG_FILE = "hvserver.log"
-PID_FILE = "hvserver.pid"
+# ===========================================================================
+# HV Server Service Settings
+# ===========================================================================
+SERVER_LOG_FILE = "hvserver.log"
+SERVER_PID_FILE = "hvserver.pid"
+
+# ===========================================================================
+# HV Logger Service Settings
+# ===========================================================================
+LOGGER_LOG_FILE = "hvlogger.log"
+LOGGER_PID_FILE = "hvlogger.pid"
+LOGGER_INTERVAL = 60.0   # polling interval in seconds
+
+# ===========================================================================
+# config.json override
+# ===========================================================================
+
 
 def load_config(config_path="config.json"):
     """
     Override default constants with values from a JSON file if it exists.
+    All keys are optional; only the ones present in the file will be overridden.
     """
     global IP_ADDRESS, SYSTEM_TYPE, USERNAME, PASSWORD
-    global CMD_PORT, PUB_PORT, LOG_FILE, PID_FILE
+    global CMD_PORT, PUB_PORT
+    global SERVER_LOG_FILE, SERVER_PID_FILE
+    global LOGGER_LOG_FILE, LOGGER_PID_FILE, LOGGER_INTERVAL
 
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                cfg = json.load(f)
-                
-            if "IP_ADDRESS" in cfg: IP_ADDRESS = cfg["IP_ADDRESS"]
-            if "SYSTEM_TYPE" in cfg: SYSTEM_TYPE = cfg["SYSTEM_TYPE"]
-            if "USERNAME" in cfg: USERNAME = cfg["USERNAME"]
-            if "PASSWORD" in cfg: PASSWORD = cfg["PASSWORD"]
-            if "CMD_PORT" in cfg: CMD_PORT = cfg["CMD_PORT"]
-            if "PUB_PORT" in cfg: PUB_PORT = cfg["PUB_PORT"]
-            if "LOG_FILE" in cfg: LOG_FILE = cfg["LOG_FILE"]
-            if "PID_FILE" in cfg: PID_FILE = cfg["PID_FILE"]
-            
-            print(f"[hvconfig] Configuration loaded from {config_path}")
-            return True
-        except Exception as e:
-            print(f"[hvconfig] Failed to load {config_path}: {e}")
+    if not os.path.exists(config_path):
+        return False
+
+    try:
+        with open(config_path, 'r') as f:
+            cfg = json.load(f)
+
+        # Hardware
+        if "IP_ADDRESS" in cfg:
+            IP_ADDRESS = cfg["IP_ADDRESS"]
+        if "SYSTEM_TYPE" in cfg:
+            SYSTEM_TYPE = cfg["SYSTEM_TYPE"]
+        if "USERNAME" in cfg:
+            USERNAME = cfg["USERNAME"]
+        if "PASSWORD" in cfg:
+            PASSWORD = cfg["PASSWORD"]
+
+        # Ports
+        if "CMD_PORT" in cfg:
+            CMD_PORT = cfg["CMD_PORT"]
+        if "PUB_PORT" in cfg:
+            PUB_PORT = cfg["PUB_PORT"]
+
+        # Server service
+        if "SERVER_LOG_FILE" in cfg:
+            SERVER_LOG_FILE = cfg["SERVER_LOG_FILE"]
+        if "SERVER_PID_FILE" in cfg:
+            SERVER_PID_FILE = cfg["SERVER_PID_FILE"]
+
+        # Logger service
+        if "LOGGER_LOG_FILE" in cfg:
+            LOGGER_LOG_FILE = cfg["LOGGER_LOG_FILE"]
+        if "LOGGER_PID_FILE" in cfg:
+            LOGGER_PID_FILE = cfg["LOGGER_PID_FILE"]
+        if "LOGGER_INTERVAL" in cfg:
+            LOGGER_INTERVAL = float(cfg["LOGGER_INTERVAL"])
+
+        print(f"[hvconfig] Configuration loaded from {config_path}")
+        return True
+    except Exception as e:
+        print(f"[hvconfig] Failed to load {config_path}: {e}")
     return False
+
 
 # Initialize configuration on import
 load_config()
