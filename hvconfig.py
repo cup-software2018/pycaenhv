@@ -1,11 +1,11 @@
 import json
 import os
 import logging
-from caenhv import SY5527
+from caenhv import SY4527, SY5527
 
 # --- Default System Settings ---
-IP_ADDRESS = "192.168.0.152"
-SYSTEM_TYPE = SY5527
+IP_ADDRESS = "172.16.2.51"
+SYSTEM_TYPE = SY4527
 USERNAME = "admin"
 PASSWORD = "admin"
 

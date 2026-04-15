@@ -121,7 +121,6 @@ class CaenHV:
         if not self.is_connected:
             raise Exception("System not initialized")
 
-        # 8개의 인자를 받을 Ctypes 변수 준비
         c_nr_slot = c_ushort(0)
         c_nr_ch_list = POINTER(c_ushort)()
         c_model_list = c_char_p()
@@ -130,7 +129,6 @@ class CaenHV:
         c_fmw_rel_min_list = POINTER(c_ubyte)()
         c_fmw_rel_max_list = POINTER(c_ubyte)()
 
-        # C 라이브러리에 8개 인자 모두 전달
         result = self._lib.CAENHV_GetCrateMap(
             self.handle.value,
             byref(c_nr_slot),
@@ -154,8 +152,6 @@ class CaenHV:
                 if ch_count > 0:
                     crate_map[i] = ch_count
 
-        # 라이브러리가 할당한 메모리 안전하게 해제 (메모리 누수 방지)
-        # c_char_p 등은 void 포인터로 캐스팅하여 C단 메모리 주소만 정확히 넘겨서 Free
         if bool(c_nr_ch_list):
             self._lib.CAENHV_Free(cast(c_nr_ch_list, c_void_p))
         if c_model_list.value:

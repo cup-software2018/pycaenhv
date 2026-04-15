@@ -112,6 +112,7 @@ def main():
     client = HVClient()
     if not client.check_server():
         print(f"Error: HV Server is not running. Please start hvserver.py first.")
+        client.close()  # Must close ZMQ context before exit, otherwise process hangs
         sys.exit(1)
 
     # 3. Synchronize hardware with table settings
