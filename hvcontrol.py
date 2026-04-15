@@ -39,13 +39,18 @@ def sync_hardware(client, channels, group="all"):
             i_set = ch.hv_set / ch.r_val
             i_limit = i_set * 1.1
 
-            # Push to server
-            client.send_command("set_name", int(ch.slot),
-                                int(ch.channel), ch.name)
+            # Push voltage and current limit (critical)
             client.send_command("set_vset", int(ch.slot),
                                 int(ch.channel), float(ch.hv_set))
             client.send_command("set_iset", int(ch.slot),
                                 int(ch.channel), float(i_limit))
+
+            # Push channel name (best-effort: some boards do not support this)
+            try:
+                client.send_command("set_name", int(ch.slot),
+                                    int(ch.channel), ch.name)
+            except Exception:
+                pass
 
 
 def _monitor_loop(stdscr, client, channels, group):

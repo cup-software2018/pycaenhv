@@ -1,6 +1,5 @@
 import json
 import os
-import logging
 from caenhv import SY4527, SY5527
 
 # --- Default System Settings ---
@@ -38,10 +37,10 @@ def load_config(config_path="config.json"):
             if "LOG_FILE" in cfg: LOG_FILE = cfg["LOG_FILE"]
             if "PID_FILE" in cfg: PID_FILE = cfg["PID_FILE"]
             
-            logging.info(f"Configuration loaded from {config_path}")
+            print(f"[hvconfig] Configuration loaded from {config_path}")
             return True
         except Exception as e:
-            logging.error(f"Failed to load {config_path}: {e}")
+            print(f"[hvconfig] Failed to load {config_path}: {e}")
     return False
 
 # Initialize configuration on import

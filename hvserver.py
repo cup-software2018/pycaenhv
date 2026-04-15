@@ -1,24 +1,23 @@
 import zmq
 import time
-import json
 import threading
 import sys
 import os
 import signal
 import logging
 import argparse
-from caenhv import CaenHV, SY4527, SY5527, N1470
-
 import hvconfig
 from caenhv import CaenHV
 
 class HVServer:
-    def __init__(self, ip=hvconfig.IP_ADDRESS, sys_type=hvconfig.SYSTEM_TYPE, 
-                 cmd_port=hvconfig.CMD_PORT, pub_port=hvconfig.PUB_PORT):
+    def __init__(self, ip=hvconfig.IP_ADDRESS, sys_type=hvconfig.SYSTEM_TYPE,
+                 cmd_port=hvconfig.CMD_PORT, pub_port=hvconfig.PUB_PORT,
+                 pid_file=None):
         self.ip = ip
         self.sys_type = sys_type
         self.cmd_port = cmd_port
         self.pub_port = pub_port
+        self.pid_file = pid_file  # Store for cleanup in shutdown()
         
         # Internal state
         self.channels = []
@@ -161,12 +160,13 @@ class HVServer:
         logging.info("Server process terminated.")
         
         # Cleanup PID file if we are the owner
-        if os.path.exists(hvconfig.PID_FILE):
+        pid_path = self.pid_file or hvconfig.PID_FILE
+        if pid_path and os.path.exists(pid_path):
             try:
-                with open(hvconfig.PID_FILE, 'r') as f:
+                with open(pid_path, 'r') as f:
                     pid = int(f.read().strip())
                 if pid == os.getpid():
-                    os.remove(hvconfig.PID_FILE)
+                    os.remove(pid_path)
             except:
                 pass
         
@@ -217,6 +217,10 @@ def main():
 
     args = parser.parse_args()
 
+    # Resolve to absolute paths NOW, before daemonize() calls os.chdir("/")
+    args.log = os.path.abspath(args.log)
+    args.pid = os.path.abspath(args.pid)
+
     # Configure logging
     log_level = logging.DEBUG if args.debug else logging.INFO
     log_handlers = [logging.FileHandler(args.log)]
@@ -248,16 +252,16 @@ def main():
         daemonize()
 
     # Write new PID file
-    global PID_FILE
-    PID_FILE = args.pid
     with open(args.pid, 'w') as f:
         f.write(str(os.getpid()))
 
-    server = HVServer(ip=args.ip, sys_type=args.sys, cmd_port=args.cmd_port, pub_port=args.pub_port)
+    server = HVServer(ip=args.ip, sys_type=args.sys,
+                      cmd_port=args.cmd_port, pub_port=args.pub_port,
+                      pid_file=args.pid)
 
     # Signal handlers
     def signal_handler(sig, frame):
-        reason = "Cought SIGNAL " + ("SIGINT" if sig == signal.SIGINT else "SIGTERM")
+        reason = "Caught SIGNAL " + ("SIGINT" if sig == signal.SIGINT else "SIGTERM")
         server.shutdown(reason)
 
     signal.signal(signal.SIGINT, signal_handler)

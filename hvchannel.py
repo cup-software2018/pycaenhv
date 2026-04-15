@@ -1,3 +1,5 @@
+# hvchannel.py
+
 class HVChannel:
     def __init__(self, name, slot, channel, hv_set, r_val, pmtid, group):
         self.name = name
