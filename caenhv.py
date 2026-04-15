@@ -1,9 +1,11 @@
 import ctypes
-from ctypes import c_int, c_char_p, c_void_p, c_ushort, c_float, byref, POINTER
+from ctypes import c_int, c_char_p, c_void_p, c_ushort, c_float, c_short, c_ubyte, byref, cast, POINTER
 from ctypes.util import find_library
+import os
 
 # CAEN System Constants
-
+SY1527 = 0
+SY2527 = 1
 SY4527 = 2
 SY5527 = 3
 N1470 = 6
@@ -60,6 +62,23 @@ class CaenHV:
         self._lib.CAENHV_GetError.argtypes = [c_int]
         self._lib.CAENHV_GetError.restype = c_char_p
 
+        # Bind CAENHV_GetCrateMap
+        self._lib.CAENHV_GetCrateMap.argtypes = [
+            c_int,
+            POINTER(c_ushort),
+            POINTER(POINTER(c_ushort)),
+            POINTER(c_char_p),
+            POINTER(c_char_p),
+            POINTER(POINTER(c_ushort)),
+            POINTER(POINTER(c_ubyte)),
+            POINTER(POINTER(c_ubyte))
+        ]
+        self._lib.CAENHV_GetCrateMap.restype = c_int
+
+        # Bind CAENHV_Free
+        self._lib.CAENHV_Free.argtypes = [c_void_p]
+        self._lib.CAENHV_Free.restype = c_int
+
     def init_system(self, system_type, ip_address, username="admin", password="admin"):
         # Convert strings to C char pointers
         c_ip = c_char_p(ip_address.encode('utf-8'))
@@ -94,6 +113,63 @@ class CaenHV:
         # Fetch the error message string from the library
         err_bytes = self._lib.CAENHV_GetError(self.handle.value)
         return err_bytes.decode('utf-8') if err_bytes else "Unknown Error"
+
+    def get_crate_map(self):
+        """
+        Returns a dictionary mapping slot index to the number of channels it has.
+        """
+        if not self.is_connected:
+            raise Exception("System not initialized")
+
+        # 8개의 인자를 받을 Ctypes 변수 준비
+        c_nr_slot = c_ushort(0)
+        c_nr_ch_list = POINTER(c_ushort)()
+        c_model_list = c_char_p()
+        c_desc_list = c_char_p()
+        c_ser_num_list = POINTER(c_ushort)()
+        c_fmw_rel_min_list = POINTER(c_ubyte)()
+        c_fmw_rel_max_list = POINTER(c_ubyte)()
+
+        # C 라이브러리에 8개 인자 모두 전달
+        result = self._lib.CAENHV_GetCrateMap(
+            self.handle.value,
+            byref(c_nr_slot),
+            byref(c_nr_ch_list),
+            byref(c_model_list),
+            byref(c_desc_list),
+            byref(c_ser_num_list),
+            byref(c_fmw_rel_min_list),
+            byref(c_fmw_rel_max_list)
+        )
+
+        if result != 0:
+            raise Exception(f"Failed to get crate map: {self.get_error()}")
+
+        crate_map = {}
+        nr_slots = c_nr_slot.value
+
+        if nr_slots > 0 and bool(c_nr_ch_list):
+            for i in range(nr_slots):
+                ch_count = c_nr_ch_list[i]
+                if ch_count > 0:
+                    crate_map[i] = ch_count
+
+        # 라이브러리가 할당한 메모리 안전하게 해제 (메모리 누수 방지)
+        # c_char_p 등은 void 포인터로 캐스팅하여 C단 메모리 주소만 정확히 넘겨서 Free
+        if bool(c_nr_ch_list):
+            self._lib.CAENHV_Free(cast(c_nr_ch_list, c_void_p))
+        if c_model_list.value:
+            self._lib.CAENHV_Free(cast(c_model_list, c_void_p))
+        if c_desc_list.value:
+            self._lib.CAENHV_Free(cast(c_desc_list, c_void_p))
+        if bool(c_ser_num_list):
+            self._lib.CAENHV_Free(cast(c_ser_num_list, c_void_p))
+        if bool(c_fmw_rel_min_list):
+            self._lib.CAENHV_Free(cast(c_fmw_rel_min_list, c_void_p))
+        if bool(c_fmw_rel_max_list):
+            self._lib.CAENHV_Free(cast(c_fmw_rel_max_list, c_void_p))
+
+        return crate_map
 
     def get_ch_param(self, slot, channel, param_name, param_type='float'):
         # Prepare inputs for a single channel
@@ -181,7 +257,3 @@ class CaenHV:
     def set_name(self, slot, channel, name):
         # Set Channel Name
         self.set_ch_param(slot, channel, "Name", name, param_type='string')
-
-    def get_status(self, slot, channel):
-        # Get Channel Status (Status is returned as an integer bitmask)
-        return self.get_ch_param(slot, channel, "Status", param_type='int')

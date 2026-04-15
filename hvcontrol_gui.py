@@ -9,15 +9,14 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
 
 # Import hardware control modules
-from caenhv import CaenHV, SY4527, SY5527, N1470
+import hvconfig
+from caenhv import CaenHV
 from hvchannel import HVChannel
 
-# change SY5527 to SY4527 or N1470 if needed
-CAENSYS = SY5527
-IPADDR = "192.168.0.152"
-
-USERNAME = "admin"
-PASSWORD = "admin"
+CAENSYS = hvconfig.SYSTEM_TYPE
+IPADDR = hvconfig.IP_ADDRESS
+USERNAME = hvconfig.USERNAME
+PASSWORD = hvconfig.PASSWORD
 
 
 def load_hv_table(filepath):

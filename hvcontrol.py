@@ -2,15 +2,14 @@ import time
 import curses
 import sys
 import argparse
-from caenhv import CaenHV, SY4527, SY5527, N1470
+from caenhv import CaenHV
 from hvchannel import HVChannel
+import hvconfig
 
-# change SY5527 to SY4527 or N1470 if needed
-CAENSYS = SY5527
-IPADDR = "192.168.0.152"
-
-USERNAME = "admin"
-PASSWORD = "admin"
+CAENSYS = hvconfig.SYSTEM_TYPE
+IPADDR = hvconfig.IP_ADDRESS
+USERNAME = hvconfig.USERNAME
+PASSWORD = hvconfig.PASSWORD
 
 
 def load_hv_table(filepath):
@@ -107,7 +106,7 @@ def main():
     # Optional arguments
     parser.add_argument("-g", "--group", default="all",
                         help="Target group name from the table (default: all)")
-    parser.add_argument("-t", "--table", default="hv_table.txt",
+    parser.add_argument("-t", "--table", default="hv.table",
                         help="Path to the HV configuration table file")
 
     args = parser.parse_args()
