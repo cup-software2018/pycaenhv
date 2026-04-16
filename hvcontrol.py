@@ -2,6 +2,7 @@ import time
 import curses
 import sys
 import argparse
+from datetime import datetime
 from caenhv import CaenHV
 from hvchannel import HVChannel
 import hvconfig
@@ -65,8 +66,9 @@ def _monitor_loop(stdscr, hv, channels, group):
     stdscr.nodelay(True)
     while True:
         stdscr.clear()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         stdscr.addstr(
-            f"=== HV Monitoring: Group '{group}' (Press 'q' to stop) ===\n\n")
+            f"=== HV Monitoring: Group '{group}'  [{now_str}]  (Press 'q' to stop) ===\n\n")
 
         for ch in channels:
             if ch.group == group or group == "all":

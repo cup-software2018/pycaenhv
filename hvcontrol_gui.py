@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QComboBox, QAbstractItemView)
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
+from datetime import datetime
 
 # Import hardware control modules
 import hvconfig
@@ -56,9 +57,25 @@ class HVControlApp(QMainWindow):
 
         self.setup_ui()
 
+        # Status bar: connection status (left) + live clock (right)
+        self.statusBar().showMessage("Disconnected")
+        self._clock_label = QLabel()
+        self.statusBar().addPermanentWidget(self._clock_label)
+        self._update_clock()
+
         # Set up the monitoring timer (1-second interval)
         self.monitor_timer = QTimer(self)
         self.monitor_timer.timeout.connect(self.update_monitor)
+
+        # Clock timer (always ticking, even when disconnected)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._update_clock)
+        self._clock_timer.start(1000)
+
+    def _update_clock(self):
+        """Update the status bar clock label with the current local time."""
+        self._clock_label.setText(
+            datetime.now().strftime("  %Y-%m-%d  %H:%M:%S  "))
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -211,6 +228,7 @@ class HVControlApp(QMainWindow):
                 self.btn_connect.setText("Disconnect")
                 self.btn_on.setEnabled(True)
                 self.btn_off.setEnabled(True)
+                self.statusBar().showMessage(f"Connected to {ip}")
 
                 # Trigger an immediate update for better UI responsiveness before starting the timer
                 self.update_monitor()
@@ -227,6 +245,7 @@ class HVControlApp(QMainWindow):
             self.btn_connect.setText("Connect")
             self.btn_on.setEnabled(False)
             self.btn_off.setEnabled(False)
+            self.statusBar().showMessage("Disconnected")
 
     def on_item_changed(self, item):
         """
