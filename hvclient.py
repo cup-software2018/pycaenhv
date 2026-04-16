@@ -45,6 +45,19 @@ class HVClient:
         except Exception:
             return False
 
+    def get_server_health(self, timeout_ms=2000) -> dict:
+        """
+        Fetch server health metrics.
+
+        Returns a dict with keys:
+            hw_state      (str)    "operational" | "degraded"
+            uptime_s      (float)
+            channel_count (int)
+            error_count   (int)
+        Raises TimeoutError if server does not respond.
+        """
+        return self.send_command("get_server_health", timeout_ms=timeout_ms)
+
     def send_command(self, method, *args, timeout_ms=2000):
         """
         Sends a command to the server and waits for a reply with a timeout to prevent GUI freezing.

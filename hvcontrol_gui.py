@@ -68,6 +68,11 @@ class HVControlApp(QMainWindow):
         self._clock_timer.timeout.connect(self._update_clock)
         self._clock_timer.start(1000)
 
+        # Track server hardware state for dynamic control enable/disable
+        self._hw_state = "degraded"   # "operational" | "degraded"
+        self._health_fail_count = 0   # consecutive get_server_health failures
+        self._HEALTH_FAIL_MAX = 3     # disconnect after this many consecutive failures
+
     def setup_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -151,6 +156,20 @@ class HVControlApp(QMainWindow):
         self._clock_label.setText(
             datetime.now().strftime("  %Y-%m-%d  %H:%M:%S  "))
 
+    def _set_hw_operational(self, operational: bool):
+        """Enable or disable write controls based on hw_state."""
+        self.btn_on.setEnabled(operational)
+        self.btn_off.setEnabled(operational)
+        # Make Name/Set(V) cells editable only when hardware is ready
+        for row in range(self.table.rowCount()):
+            for col in [1, 4]:   # Name, Set(V)
+                item = self.table.item(row, col)
+                if item:
+                    if operational:
+                        item.setFlags(item.flags() | Qt.ItemIsEditable)
+                    else:
+                        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+
     def load_data(self, show_error=True):
         filepath = self.file_input.text()
         try:
@@ -213,41 +232,57 @@ class HVControlApp(QMainWindow):
                     self, "Warning", "No channels loaded.\nPlease load a valid table file first.")
                 return
 
-            # Update client destination if host changed
             host = self.host_input.text().strip()
-            self.client.cmd_url = f"tcp://{host}:{hvconfig.CMD_PORT}"
-            self.client.close()  # Close existing sockets before creating new ones
+            self.client.close()
             self.client = HVClient(
                 cmd_url=f"tcp://{host}:{hvconfig.CMD_PORT}",
                 sub_url=f"tcp://{host}:{hvconfig.PUB_PORT}")
 
-            # Check if server is running
-            if self.client.check_server():
+            if not self.client.check_server():
+                QMessageBox.critical(
+                    self, "Connection Error",
+                    f"HV Server is not running at {host}.\nPlease start hvserver.py first.")
+                return
+
+            # Fetch server hardware state
+            try:
+                health = self.client.get_server_health()
+                self._hw_state = health.get("hw_state", "degraded")
+            except Exception:
+                self._hw_state = "degraded"
+
+            if self._hw_state == "operational":
+                # Full connect: sync settings then start monitoring
                 try:
-                    # Synchronize hardware with our table
                     self._sync_hardware_settings()
-
-                    self.is_connected = True
-
-                    # Update UI state
-                    self.btn_connect.setText("Disconnect")
-                    self.btn_on.setEnabled(True)
-                    self.btn_off.setEnabled(True)
-                    self.statusBar().showMessage(
-                        f"Connected to {host}:{hvconfig.CMD_PORT}")
-
-                    self.monitor_timer.start(1000)
-                    QMessageBox.information(
-                        self, "Success", f"Connected and Synchronized with HV Server")
                 except Exception as e:
                     QMessageBox.critical(
                         self, "Sync Error", f"Failed to push settings to server:\n{e}")
+                    return
+                self.statusBar().showMessage(
+                    f"Server: RUNNING  ({host}:{hvconfig.CMD_PORT})")
+                QMessageBox.information(self, "Connected",
+                                        "Connected and synchronized with HV Server.")
             else:
-                QMessageBox.critical(
-                    self, "Connection Error", f"HV Server is not running at {host}. Please start hvserver.py first.")
+                # Degraded: monitoring only, skip sync
+                self.statusBar().showMessage(
+                    f"Server: DEGRADED (waiting CAEN)  ({host}:{hvconfig.CMD_PORT})")
+                QMessageBox.warning(
+                    self, "Server Degraded",
+                    "HV server is running but hardware is not connected.\n"
+                    "Monitoring only — write controls are disabled.\n"
+                    "Controls will be enabled automatically when hardware reconnects.")
+
+            self.is_connected = True
+            self.btn_connect.setText("Disconnect")
+            self._set_hw_operational(self._hw_state == "operational")
+            self.monitor_timer.start(1000)
+
         else:
             self.monitor_timer.stop()
             self.is_connected = False
+            self._hw_state = "degraded"
+            self._health_fail_count = 0
             self.btn_connect.setText("Connect")
             self.btn_on.setEnabled(False)
             self.btn_off.setEnabled(False)
@@ -339,14 +374,45 @@ class HVControlApp(QMainWindow):
             return
 
         try:
+            # --- Check server hw_state every cycle ---
+            try:
+                health = self.client.get_server_health()
+                new_hw_state = health.get("hw_state", "degraded")
+                self._health_fail_count = 0   # reset on success
+            except Exception:
+                self._health_fail_count += 1
+                host = self.host_input.text().strip()
+                self.statusBar().showMessage(
+                    f"Server: UNREACHABLE  ({host})  "
+                    f"(retry {self._health_fail_count}/{self._HEALTH_FAIL_MAX})")
+                if self._health_fail_count >= self._HEALTH_FAIL_MAX:
+                    raise RuntimeError(
+                        f"Server did not respond {self._HEALTH_FAIL_MAX} times in a row.")
+                return   # transient failure — try again next tick
+
+            if new_hw_state != self._hw_state:
+                self._hw_state = new_hw_state
+                self._set_hw_operational(new_hw_state == "operational")
+                host = self.host_input.text().strip()
+                if new_hw_state == "operational":
+                    # Hardware just recovered: push table settings now
+                    try:
+                        self._sync_hardware_settings()
+                    except Exception:
+                        pass
+                    self.statusBar().showMessage(
+                        f"Server: RUNNING  ({host}:{hvconfig.CMD_PORT})")
+                else:
+                    self.statusBar().showMessage(
+                        f"Server: DEGRADED (waiting CAEN)  ({host}:{hvconfig.CMD_PORT})")
+
+            # --- Poll telemetry ---
             data = self.client.poll_data()
             if not data:
                 return
 
-            # Map the incoming data to table rows
             for row in range(self.table.rowCount()):
                 ch = self.table.item(row, 0).data(Qt.UserRole)
-                # Find matching channel in published data
                 ch_update = next((d for d in data if d["slot"] == int(
                     ch.slot) and d["channel"] == int(ch.channel)), None)
 

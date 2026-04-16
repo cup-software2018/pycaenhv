@@ -54,13 +54,25 @@ def sync_hardware(client, channels, group="all"):
                 pass
 
 
+def _server_status_str(client) -> str:
+    """Return a one-word server status for display in the monitor header."""
+    try:
+        health = client.get_server_health()
+        hw = health.get("hw_state", "degraded")
+        return "RUNNING" if hw == "operational" else "DEGRADED (waiting CAEN)"
+    except Exception:
+        return "UNREACHABLE"
+
+
 def _monitor_loop(stdscr, client, channels, group):
     stdscr.nodelay(True)
     while True:
         stdscr.clear()
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status  = _server_status_str(client)
         stdscr.addstr(
-            f"=== HV Monitoring: Group '{group}'  [{now_str}]  (Press 'q' to stop) ===\n\n")
+            f"=== HV Monitoring: Group '{group}'  [{now_str}]"
+            f"  Server: {status}  (Press 'q' to stop) ===\n\n")
 
         # Pull latest raw data from server
         raw_data = client.poll_data()
@@ -69,12 +81,10 @@ def _monitor_loop(stdscr, client, channels, group):
             # Match raw data with our table objects
             for ch in channels:
                 if ch.group == group or group == "all":
-                    # Find matching slot/ch in raw data
                     update = next((d for d in raw_data if d["slot"] == int(
                         ch.slot) and d["channel"] == int(ch.channel)), None)
                     if update:
                         ch.set_current_value(update["vmon"], update["imon"])
-                        # This will use the name from the table
                         ch.print_info(stdscr)
         else:
             stdscr.addstr("Waiting for data from server...\n")
@@ -115,17 +125,33 @@ def main():
     # 1. Load the local table
     fChannels = load_hv_table(args.table)
 
-    # 2. Connect to Client and Check Server
+    # 2. Connect and check server
     client = HVClient()
     if not client.check_server():
-        print(f"Error: HV Server is not running. Please start hvserver.py first.")
-        client.close()  # Must close ZMQ context before exit, otherwise process hangs
+        print("Error: HV Server is not running. Please start hvserver.py first.")
+        client.close()
         sys.exit(1)
 
-    # 3. Synchronize hardware with table settings
-    sync_hardware(client, fChannels, args.group)
+    # 3. Get server health to determine hw_state
+    try:
+        health   = client.get_server_health()
+        hw_state = health.get("hw_state", "degraded")
+    except Exception:
+        hw_state = "degraded"
 
-    # 4. Execute action
+    if hw_state == "operational":
+        # 4a. Sync hardware settings and execute action
+        sync_hardware(client, fChannels, args.group)
+    else:
+        # 4b. Degraded mode: skip sync, warn user
+        print("Warning: Server is DEGRADED (waiting for CAEN hardware). Sync skipped.")
+        print("Monitoring only — on/off commands will be blocked until hardware reconnects.\n")
+        if args.action in ['on', 'off']:
+            print(f"Cannot execute '{args.action}': server hardware not ready.")
+            print("Switching to monitoring mode instead.")
+            args.action = 'mon'
+
+    # 5. Execute action
     if args.action == 'mon':
         monitoring(client, fChannels, args.group)
 
