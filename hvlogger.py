@@ -73,20 +73,21 @@ def db_write_server_health(db, record: dict):
 
     record dict contains:
         timestamp      (datetime, UTC)
-        alive          (bool)   True if server responded
-        ping_ms        (float)  round-trip time in milliseconds (NaN if dead)
-        uptime_s       (float)  server process uptime in seconds (NaN if dead)
-        channel_count  (int)    number of discovered hardware channels (0 if dead)
-        error_count    (int)    cumulative hardware errors on the server (0 if dead)
+        server_status  (str)    "running" | "degraded" | "unreachable"
+        ping_ms        (float)  round-trip time in milliseconds (NaN if unreachable)
+        hw_state       (str)    "operational" | "degraded" | "" if unreachable
+        uptime_s       (float)  server process uptime in seconds (NaN if unreachable)
+        channel_count  (int)    number of discovered hardware channels (0 if unreachable)
+        error_count    (int)    cumulative hardware errors on server (0 if unreachable)
     """
     # TODO: implement server health DB write
     # Example (InfluxDB):
     #   p = (Point("hv_server")
-    #        .field("alive",         int(record["alive"]))
-    #        .field("ping_ms",       record["ping_ms"])
-    #        .field("uptime_s",      record["uptime_s"])
-    #        .field("channel_count", record["channel_count"])
-    #        .field("error_count",   record["error_count"])
+    #        .field("server_status",  record["server_status"])
+    #        .field("ping_ms",        record["ping_ms"])
+    #        .field("uptime_s",       record["uptime_s"])
+    #        .field("channel_count",  record["channel_count"])
+    #        .field("error_count",    record["error_count"])
     #        .time(record["timestamp"]))
     #   write_api.write(bucket=BUCKET, record=p)
     pass
@@ -97,19 +98,21 @@ def db_write_logger_health(db, record: dict):
     Write logger self-health metrics to the time-series DB.
 
     record dict contains:
-        timestamp    (datetime, UTC)
-        uptime_s     (float)   seconds since logger started
-        cycle_count  (int)     number of completed collection cycles
-        error_count  (int)     cumulative collection errors
-        mem_rss_mb   (float)   resident memory usage in MB
+        timestamp      (datetime, UTC)
+        logger_status  (str)    "running" | "degraded"
+        uptime_s       (float)  seconds since logger started
+        cycle_count    (int)    number of completed collection cycles
+        error_count    (int)    cumulative collection errors
+        mem_rss_mb     (float)  resident memory usage in MB
     """
     # TODO: implement logger self-health DB write
     # Example (InfluxDB):
     #   p = (Point("hv_logger")
-    #        .field("uptime_s",    record["uptime_s"])
-    #        .field("cycle_count", record["cycle_count"])
-    #        .field("error_count", record["error_count"])
-    #        .field("mem_rss_mb",  record["mem_rss_mb"])
+    #        .field("logger_status", record["logger_status"])
+    #        .field("uptime_s",      record["uptime_s"])
+    #        .field("cycle_count",   record["cycle_count"])
+    #        .field("error_count",   record["error_count"])
+    #        .field("mem_rss_mb",    record["mem_rss_mb"])
     #        .time(record["timestamp"]))
     #   write_api.write(bucket=BUCKET, record=p)
     pass
@@ -182,21 +185,34 @@ def get_mem_rss_mb() -> float:
 
 
 def collect_and_write(client: HVClient, db,
-                      start_time: float, cycle_count: int, error_count: int) -> None:
+                      start_time: float, cycle_count: int, error_count: int,
+                      prev_alive: bool) -> bool:
     """
     One monitoring cycle:
       1. Ping the server        → server health record
       2. Poll channel telemetry → per-channel records
       3. Report logger health   → self-health record
+
+    Returns:
+        alive (bool) — current server reachability (for transition tracking)
     """
     now = datetime.now(timezone.utc)
 
     # --- 1. Server health ---
     alive, ping_ms = ping_server(client)
+
+    # Detect and log state transitions
+    if alive and not prev_alive:
+        logging.info("hvserver reconnected — resuming normal mode.")
+    elif not alive and prev_alive:
+        logging.warning("hvserver stopped — entering degraded mode.")
+        client.latest_data = None   # clear stale telemetry
+
     server_record = {
         "timestamp":     now,
-        "alive":         alive,
+        "server_status": "unreachable",
         "ping_ms":       ping_ms,
+        "hw_state":      "",
         "uptime_s":      float('nan'),
         "channel_count": 0,
         "error_count":   0,
@@ -204,20 +220,27 @@ def collect_and_write(client: HVClient, db,
     if alive:
         try:
             srv_health = client.send_command("get_server_health")
+            hw_state = srv_health["hw_state"]
+            server_record["hw_state"]      = hw_state
             server_record["uptime_s"]      = srv_health["uptime_s"]
             server_record["channel_count"] = srv_health["channel_count"]
             server_record["error_count"]   = srv_health["error_count"]
+            server_record["server_status"] = (
+                "running" if hw_state == "operational" else "degraded"
+            )
             logging.info(
-                f"Server alive  ping={ping_ms:.1f} ms  "
+                f"Server {server_record['server_status']}  "
+                f"ping={ping_ms:.1f} ms  hw={hw_state}  "
                 f"uptime={srv_health['uptime_s']:.0f}s  "
                 f"channels={srv_health['channel_count']}  "
                 f"errors={srv_health['error_count']}"
             )
         except Exception as e:
             logging.warning(f"get_server_health failed: {e}")
+            server_record["server_status"] = "degraded"
             logging.info(f"Server alive  ping={ping_ms:.1f} ms")
     else:
-        logging.warning("Server NOT responding!")
+        logging.warning("Server unreachable  [DEGRADED MODE]")
     db_write_server_health(db, server_record)
 
     # --- 2. Channel telemetry ---
@@ -251,20 +274,24 @@ def collect_and_write(client: HVClient, db,
             logging.warning("No telemetry data received from server.")
 
     # --- 3. Logger self-health ---
+    logger_status = "running" if alive else "degraded"
     uptime_s = time.monotonic() - start_time
     mem_mb = get_mem_rss_mb()
     logger_record = {
-        "timestamp":   now,
-        "uptime_s":    uptime_s,
-        "cycle_count": cycle_count,
-        "error_count": error_count,
-        "mem_rss_mb":  mem_mb,
+        "timestamp":     now,
+        "logger_status": logger_status,
+        "uptime_s":      uptime_s,
+        "cycle_count":   cycle_count,
+        "error_count":   error_count,
+        "mem_rss_mb":    mem_mb,
     }
     logging.info(
-        f"Logger health  uptime={uptime_s:.0f}s  "
+        f"Logger {logger_status}  uptime={uptime_s:.0f}s  "
         f"cycles={cycle_count}  errors={error_count}  mem={mem_mb:.1f} MB"
     )
     db_write_logger_health(db, logger_record)
+
+    return alive
 
 
 # ---------------------------------------------------------------------------
@@ -353,11 +380,14 @@ def main():
     signal.signal(signal.SIGTERM, _stop)
 
     # Main loop
+    server_alive = False   # track server reachability across cycles
     try:
         while running:
             try:
-                collect_and_write(client, db, start_time,
-                                  cycle_count, error_count)
+                server_alive = collect_and_write(
+                    client, db, start_time,
+                    cycle_count, error_count,
+                    server_alive)
                 cycle_count += 1
             except Exception as e:
                 error_count += 1

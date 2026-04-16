@@ -12,105 +12,175 @@ from caenhv import CaenHV
 class HVServer:
     def __init__(self, ip=hvconfig.IP_ADDRESS, sys_type=hvconfig.SYSTEM_TYPE,
                  cmd_port=hvconfig.CMD_PORT, pub_port=hvconfig.PUB_PORT,
-                 pid_file=None):
+                 pid_file=None, reconnect_interval=None):
         self.ip = ip
         self.sys_type = sys_type
         self.cmd_port = cmd_port
         self.pub_port = pub_port
-        self.pid_file = pid_file  # Store for cleanup in shutdown()
-        
+        self.pid_file = pid_file
+        self.reconnect_interval = reconnect_interval or hvconfig.RECONNECT_INTERVAL
+
         # Internal state
         self.channels = []
         self.hv = CaenHV()
         self.context = zmq.Context()
-        
+
         self.cmd_socket = self.context.socket(zmq.REP)
         self.cmd_socket.bind(f"tcp://*:{self.cmd_port}")
-        
+
         self.pub_socket = self.context.socket(zmq.PUB)
         self.pub_socket.bind(f"tcp://*:{self.pub_port}")
-        
-        self.running = True
-        self.monitor_thread = None
-        self.start_time = time.monotonic()  # for uptime tracking
-        self.error_count = 0                # hardware error counter
 
-    def start(self):
+        self.running     = True
+        self.hw_ready    = False   # True when hardware is connected and usable
+        self.hw_state    = "degraded"  # "operational" | "degraded"
+        self.monitor_thread   = None
+        self.reconnect_thread = None
+        self.start_time  = time.monotonic()
+        self.error_count = 0
+
+    # ------------------------------------------------------------------
+    # Hardware connection helpers
+    # ------------------------------------------------------------------
+
+    def _connect_hardware(self) -> bool:
+        """
+        Attempt to connect and discover CAEN hardware.
+        Returns True on success, False on failure.
+        Thread-safe: called from both start() and _reconnect_loop().
+        """
         try:
             logging.info(f"Connecting to CAEN HV at {self.ip}...")
-            self.hv.init_system(self.sys_type, self.ip, hvconfig.USERNAME, hvconfig.PASSWORD)
-            
-            # Hardware discovery
+            self.hv.init_system(self.sys_type, self.ip,
+                                hvconfig.USERNAME, hvconfig.PASSWORD)
+
             logging.info("Discovering hardware layout...")
             crate_map = self.hv.get_crate_map()
-            self.channels = []
+            channels = []
             for slot, ch_count in crate_map.items():
                 for ch_idx in range(ch_count):
-                    self.channels.append({
-                        "slot": int(slot),
-                        "channel": int(ch_idx)
-                    })
-            
-            logging.info(f"Discovery complete: Found {len(crate_map)} active slots and {len(self.channels)} total channels.")
-            
-            # Start monitoring thread
-            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-            self.monitor_thread.start()
-            
-            logging.info(f"HV Server is fully operational.")
-            logging.info(f"Listening for commands on port {self.cmd_port}")
-            logging.info(f"Broadcasting telemetry on port {self.pub_port}")
-            
-            self._command_loop()
-            
+                    channels.append({"slot": int(slot), "channel": int(ch_idx)})
+
+            self.channels = channels
+            self.hw_ready = True
+            self.hw_state = "operational"
+            logging.info(
+                f"Hardware connected: {len(crate_map)} slots, "
+                f"{len(self.channels)} channels."
+            )
+            return True
+
         except Exception as e:
-            logging.error(f"Critical Startup Error: {e}")
-            self.shutdown(f"Startup failed: {e}")
+            self.hw_ready = False
+            self.hw_state = "degraded"
+            logging.warning(f"Hardware connection failed: {e}")
+            return False
+
+    def _reconnect_loop(self):
+        """
+        Background thread: periodically retry hardware when in degraded state.
+        On success, starts / restarts the monitor thread.
+        """
+        while self.running:
+            # Sleep in short steps so shutdown is responsive
+            deadline = time.monotonic() + self.reconnect_interval
+            while self.running and time.monotonic() < deadline:
+                time.sleep(0.5)
+
+            if not self.running:
+                break
+
+            if not self.hw_ready:
+                logging.info("Retrying hardware connection...")
+                if self._connect_hardware():
+                    # Restart monitor thread if not alive
+                    if (self.monitor_thread is None
+                            or not self.monitor_thread.is_alive()):
+                        self.monitor_thread = threading.Thread(
+                            target=self._monitor_loop, daemon=True)
+                        self.monitor_thread.start()
+                        logging.info("Monitor thread restarted.")
+
+    # ------------------------------------------------------------------
+    # Main startup
+    # ------------------------------------------------------------------
+
+    def start(self):
+        # ZMQ sockets are already bound in __init__ — server is "alive" here.
+        logging.info(f"Listening for commands on port {self.cmd_port}")
+        logging.info(f"Broadcasting telemetry on port {self.pub_port}")
+
+        # Initial hardware connection attempt
+        if self._connect_hardware():
+            # Start monitor thread immediately
+            self.monitor_thread = threading.Thread(
+                target=self._monitor_loop, daemon=True)
+            self.monitor_thread.start()
+            logging.info("HV Server is fully operational.")
+        else:
+            logging.warning(
+                "Starting in DEGRADED mode — hardware not reachable. "
+                f"Will retry every {self.reconnect_interval:.0f}s."
+            )
+
+        # Reconnect thread always runs (handles both initial failure and mid-run loss)
+        self.reconnect_thread = threading.Thread(
+            target=self._reconnect_loop, daemon=True)
+        self.reconnect_thread.start()
+
+        self._command_loop()
+
+    # ------------------------------------------------------------------
+    # Background monitor loop (1 Hz telemetry publish)
+    # ------------------------------------------------------------------
 
     def _monitor_loop(self):
-        logging.debug("Starting background monitoring loop (1Hz)")
-        while self.running:
+        logging.debug("Monitor loop started (1 Hz)")
+        while self.running and self.hw_ready:
             data_list = []
             try:
                 for ch_info in self.channels:
-                    slot = ch_info["slot"]
+                    slot    = ch_info["slot"]
                     channel = ch_info["channel"]
-                    
-                    vmon = self.hv.get_vmon(slot, channel)
-                    imon = self.hv.get_imon(slot, channel)
-                    status = self.hv.get_status(slot, channel)
-                    
                     data_list.append({
-                        "slot": slot,
+                        "slot":    slot,
                         "channel": channel,
-                        "vmon": vmon,
-                        "imon": imon,
-                        "status": status
+                        "vmon":    self.hv.get_vmon(slot, channel),
+                        "imon":    self.hv.get_imon(slot, channel),
+                        "status":  self.hv.get_status(slot, channel),
                     })
-                
-                # Publish data
+
                 self.pub_socket.send_json({"type": "update", "data": data_list})
-                
+
             except Exception as e:
                 self.error_count += 1
-                logging.error(f"Hardware communication lost during monitor: {e}")
-                self.shutdown(f"Hardware lost: {e}")
-                break
-                
+                self.hw_ready = False
+                self.hw_state = "degraded"
+                logging.error(
+                    f"Hardware communication lost (errors={self.error_count}): {e}. "
+                    f"Entering degraded mode; reconnect thread will retry."
+                )
+                break   # exit loop — reconnect_loop will restart us
+
             time.sleep(1)
+        logging.debug("Monitor loop exited.")
+
+    # ------------------------------------------------------------------
+    # Command loop & request dispatch
+    # ------------------------------------------------------------------
 
     def _command_loop(self):
         poller = zmq.Poller()
         poller.register(self.cmd_socket, zmq.POLLIN)
-        
+
         while self.running:
-            if poller.poll(500): # 500ms timeout to keep loop responsive to shutdown flag
+            if poller.poll(500):
                 try:
-                    msg = self.cmd_socket.recv_json()
+                    msg    = self.cmd_socket.recv_json()
                     method = msg.get("method")
                     params = msg.get("params", [])
-                    
-                    logging.info(f"CMD Request: {method}({params})")
+
+                    logging.debug(f"CMD: {method}({params})")
                     result = self._handle_request(method, params)
                     self.cmd_socket.send_json({"status": "ok", "result": result})
                 except Exception as e:
@@ -118,68 +188,70 @@ class HVServer:
                     self.cmd_socket.send_json({"status": "error", "error": str(e)})
 
     def _handle_request(self, method, params):
+        # Always available regardless of hw_state
         if method == "ping":
             return "pong"
 
         if method == "get_server_health":
             return {
-                "uptime_s":     time.monotonic() - self.start_time,
+                "uptime_s":      time.monotonic() - self.start_time,
+                "hw_state":      self.hw_state,
                 "channel_count": len(self.channels),
-                "error_count":  self.error_count,
+                "error_count":   self.error_count,
             }
 
         if method == "get_channels":
             return self.channels
 
-        # Standard hardware commands
-        if method == "turn_on":
-            return self.hv.turn_on(*params)
-        if method == "turn_off":
-            return self.hv.turn_off(*params)
-        if method == "set_vset":
-            return self.hv.set_vset(*params)
-        if method == "set_iset":
-            return self.hv.set_iset(*params)
-        if method == "set_name":
-            return self.hv.set_name(*params)
-        if method == "get_ch_param":
-            return self.hv.get_ch_param(*params)
+        # Hardware commands — blocked in degraded mode
+        if not self.hw_ready:
+            raise RuntimeError(
+                f"Server is in {self.hw_state} mode: hardware not connected"
+            )
+
+        if method == "turn_on":     return self.hv.turn_on(*params)
+        if method == "turn_off":    return self.hv.turn_off(*params)
+        if method == "set_vset":    return self.hv.set_vset(*params)
+        if method == "set_iset":    return self.hv.set_iset(*params)
+        if method == "set_name":    return self.hv.set_name(*params)
+        if method == "get_ch_param":return self.hv.get_ch_param(*params)
 
         raise ValueError(f"Unknown method: {method}")
 
+    # ------------------------------------------------------------------
+    # Shutdown
+    # ------------------------------------------------------------------
+
     def shutdown(self, reason):
-        if not self.running and not reason.startswith("Startup"):
-            return # Already shutting down
-            
+        if not self.running:
+            return
+
         logging.info(f"Shutting down server. Reason: {reason}")
         self.running = False
-        
+
         try:
-            # Notify clients
-            self.pub_socket.send_json({"type": "shutdown", "reason": reason}, flags=zmq.NOBLOCK)
-            time.sleep(0.5) 
-            
-            # Close hardware
+            self.pub_socket.send_json(
+                {"type": "shutdown", "reason": reason}, flags=zmq.NOBLOCK)
+            time.sleep(0.5)
+
             if self.hv.is_connected:
                 self.hv.deinit_system()
-                logging.info("CAEN System deinitialized.")
+                logging.info("CAEN system deinitialized.")
         except Exception as e:
             logging.error(f"Error during shutdown: {e}")
-            
+
         self.context.term()
         logging.info("Server process terminated.")
-        
-        # Cleanup PID file if we are the owner
-        pid_path = self.pid_file or hvconfig.PID_FILE
+
+        pid_path = self.pid_file
         if pid_path and os.path.exists(pid_path):
             try:
                 with open(pid_path, 'r') as f:
-                    pid = int(f.read().strip())
-                if pid == os.getpid():
-                    os.remove(pid_path)
-            except:
+                    if int(f.read().strip()) == os.getpid():
+                        os.remove(pid_path)
+            except Exception:
                 pass
-        
+
         sys.exit(0)
 
 def daemonize():

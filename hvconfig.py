@@ -19,8 +19,9 @@ PUB_PORT = 5556   # PUB/SUB telemetry channel
 # ===========================================================================
 # HV Server Service Settings
 # ===========================================================================
-SERVER_LOG_FILE = "hvserver.log"
-SERVER_PID_FILE = "hvserver.pid"
+SERVER_LOG_FILE     = "hvserver.log"
+SERVER_PID_FILE     = "hvserver.pid"
+RECONNECT_INTERVAL  = 30.0   # seconds between hardware reconnection attempts
 
 # ===========================================================================
 # HV Logger Service Settings
@@ -72,6 +73,8 @@ def load_config(config_path="config.json"):
             SERVER_LOG_FILE = cfg["SERVER_LOG_FILE"]
         if "SERVER_PID_FILE" in cfg:
             SERVER_PID_FILE = cfg["SERVER_PID_FILE"]
+        if "RECONNECT_INTERVAL" in cfg:
+            RECONNECT_INTERVAL = float(cfg["RECONNECT_INTERVAL"])
 
         # Logger service
         if "LOGGER_LOG_FILE" in cfg:
