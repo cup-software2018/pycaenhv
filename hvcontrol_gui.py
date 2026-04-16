@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QComboBox, QAbstractItemView)
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
+from datetime import datetime
 
 # Import hardware control modules
 import hvconfig
@@ -52,9 +53,20 @@ class HVControlApp(QMainWindow):
 
         self.setup_ui()
 
+        # Status bar: connection status (left) + live clock (right)
+        self.statusBar().showMessage("Disconnected")
+        self._clock_label = QLabel()
+        self.statusBar().addPermanentWidget(self._clock_label)
+        self._update_clock()
+
         # Set up the monitoring timer (1-second interval)
         self.monitor_timer = QTimer(self)
         self.monitor_timer.timeout.connect(self.update_monitor)
+
+        # Clock timer (always ticking, even when disconnected)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._update_clock)
+        self._clock_timer.start(1000)
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -133,6 +145,11 @@ class HVControlApp(QMainWindow):
         if file_path:
             self.file_input.setText(file_path)
             self.load_data()
+
+    def _update_clock(self):
+        """Update the status bar clock label with the current local time."""
+        self._clock_label.setText(
+            datetime.now().strftime("  %Y-%m-%d  %H:%M:%S  "))
 
     def load_data(self, show_error=True):
         filepath = self.file_input.text()
@@ -216,6 +233,8 @@ class HVControlApp(QMainWindow):
                     self.btn_connect.setText("Disconnect")
                     self.btn_on.setEnabled(True)
                     self.btn_off.setEnabled(True)
+                    self.statusBar().showMessage(
+                        f"Connected to {host}:{hvconfig.CMD_PORT}")
 
                     self.monitor_timer.start(1000)
                     QMessageBox.information(
@@ -232,6 +251,7 @@ class HVControlApp(QMainWindow):
             self.btn_connect.setText("Connect")
             self.btn_on.setEnabled(False)
             self.btn_off.setEnabled(False)
+            self.statusBar().showMessage("Disconnected")
 
     def on_item_changed(self, item):
         if not self.is_connected:
@@ -361,16 +381,16 @@ class HVControlApp(QMainWindow):
                     status_item.setForeground(state_color)
 
         except RuntimeError as e:
-            # Handle server shutdown message
             self.monitor_timer.stop()
             self.is_connected = False
             self.btn_connect.setText("Connect")
+            self.statusBar().showMessage("Disconnected — server shut down")
             QMessageBox.critical(self, "Server Disconnected", str(e))
         except Exception as e:
-            # Handle other potential server disconnections
             self.monitor_timer.stop()
             self.is_connected = False
             self.btn_connect.setText("Connect")
+            self.statusBar().showMessage("Disconnected — connection lost")
             QMessageBox.critical(self, "Server Lost",
                                  f"Lost connection to server:\n{e}")
 

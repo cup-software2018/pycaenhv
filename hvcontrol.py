@@ -2,6 +2,7 @@ import time
 import curses
 import sys
 import argparse
+from datetime import datetime
 from hvclient import HVClient
 from hvchannel import HVChannel
 import hvconfig
@@ -57,8 +58,9 @@ def _monitor_loop(stdscr, client, channels, group):
     stdscr.nodelay(True)
     while True:
         stdscr.clear()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         stdscr.addstr(
-            f"=== HV Monitoring: Group '{group}' (Press 'q' to stop) ===\n\n")
+            f"=== HV Monitoring: Group '{group}'  [{now_str}]  (Press 'q' to stop) ===\n\n")
 
         # Pull latest raw data from server
         raw_data = client.poll_data()
