@@ -25,3 +25,23 @@ class HVChannel:
             stdscr.addstr(info_str + "\n")
         else:
             print(info_str)
+
+def load_hv_table(filepath):
+    """
+    Parses the hv.table text file and returns a list of HVChannel objects.
+    Line format: Name Slot Channel VSet R(MOhm) PMTID Group
+    """
+    channels = []
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split()
+            if len(parts) >= 7:
+                ch = HVChannel(
+                    name=parts[0], slot=parts[1], channel=parts[2],
+                    hv_set=parts[3], r_val=parts[4], pmtid=parts[5], group=parts[6]
+                )
+                channels.append(ch)
+    return channels

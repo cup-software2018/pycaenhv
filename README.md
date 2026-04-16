@@ -8,9 +8,9 @@ This project uses a **ZeroMQ-based Server-Client architecture** to allow multipl
 - **Server-Client Architecture**: A central server manages the hardware link, while multiple CLI/GUI clients can connect simultaneously.
 - **Table-less Server**: The server automatically discovers all available hardware slots and channels. Configuration (naming, grouping) is managed by the clients via `hv.table`.
 - **Automated Parameter Calculation**: Current limits ($I_0Set$) are automatically derived from target voltage and resistance ($I = V/R$) with a 10% safety margin.
-- **Daemon Support**: Both the server and the logger can run in the background with PID file management and signal handling.
+- **Fault Tolerance (Degraded Mode)**: The server process continues handling ZMQ connections even if it loses physical connectivity to the CAEN mainframe, queuing reconnections safely while rejecting invalid writes.
 - **Multi-Client Monitoring**: ZeroMQ PUB/SUB pattern allows 1 Hz real-time telemetry broadcasting to all connected clients simultaneously.
-- **Slow-Control Logging**: `hvlogger.py` periodically records channel V/I, server health, and its own health to a time-series DB for long-term Grafana monitoring.
+- **Slow-Control Logging**: `hvlogger.py` periodically records channel V/I and system health booleans (`server_connected`, `caen_connected`) to a time-series DB for long-term Grafana monitoring.
 - **GUI & CLI Clients**: Professional terminal dashboard (CLI) and a PySide6 GUI with remote server address support.
 
 ## 2. File Structure
@@ -35,7 +35,7 @@ export LD_LIBRARY_PATH=/path/to/caen/lib:$LD_LIBRARY_PATH
 
 ### 2) Python Dependencies
 ```bash
-pip install pyzmq PySide6
+pip install pyzmq PySide6 influxdb-client
 ```
 
 ### 3) System Dependencies (OpenSSL 1.1)
@@ -52,8 +52,9 @@ All defaults are defined in `hvconfig.py`, organized by service:
 |---------|-----------|
 | Hardware | `IP_ADDRESS`, `SYSTEM_TYPE`, `USERNAME`, `PASSWORD` |
 | ZMQ Ports | `CMD_PORT` (5555), `PUB_PORT` (5556) |
-| Server service | `SERVER_LOG_FILE`, `SERVER_PID_FILE` |
+| Server service | `SERVER_LOG_FILE`, `SERVER_PID_FILE`, `RECONNECT_INTERVAL` |
 | Logger service | `LOGGER_LOG_FILE`, `LOGGER_PID_FILE`, `LOGGER_INTERVAL` |
+| InfluxDB | `INFLUX_URL`, `INFLUX_TOKEN`, `INFLUX_ORG`, `INFLUX_BUCKET` |
 
 Create a `config.json` in the project root to override any setting without modifying source code:
 ```json
@@ -64,9 +65,14 @@ Create a `config.json` in the project root to override any setting without modif
   "PUB_PORT": 5556,
   "SERVER_LOG_FILE": "hvserver.log",
   "SERVER_PID_FILE": "hvserver.pid",
+  "RECONNECT_INTERVAL": 30.0,
   "LOGGER_LOG_FILE": "hvlogger.log",
   "LOGGER_PID_FILE": "hvlogger.pid",
-  "LOGGER_INTERVAL": 60.0
+  "LOGGER_INTERVAL": 60.0,
+  "INFLUX_URL": "http://localhost:8086",
+  "INFLUX_TOKEN": "your-influxdb-token",
+  "INFLUX_ORG": "cups",
+  "INFLUX_BUCKET": "hv"
 }
 ```
 *(System Type: 2 = SY4527, 3 = SY5527, 6 = N1470)*
@@ -146,12 +152,9 @@ kill $(cat hvlogger.pid)                         # graceful stop
 ```
 
 **Implementing DB writes:**
-Open `hvlogger.py` and fill in the three stub functions for your chosen DB:
-- `db_connect()` — open connection
-- `db_write_channels(db, records)` — per-channel V/I/status data
-- `db_write_server_health(db, record)` — server ping/alive
-- `db_write_logger_health(db, record)` — logger uptime/memory/errors
-
+Open `hvlogger.py` and fill in the DB connection logic inside the stub functions. The logger records standardized health structures:
+- **Server Health**: Logs boolean values for `server_connected` (ZMQ ping success) and `caen_connected` (Hardware interface operational). If `server_connected` is False, `caen_connected` is implicitly `None` (Unknown).
+- **Logger Health**: Logs internal metrics (Uptime, Memory RSS, Error counts) indicating the logger daemon itself is alive.
 ## 6. Communications Protocol
 - **CMD Port (5555)**: ZMQ REQ/REP — explicit commands (turn on, set voltage, ping).
 - **PUB Port (5556)**: ZMQ PUB/SUB — 1 Hz telemetry broadcast (VMon, IMon, Status per channel).

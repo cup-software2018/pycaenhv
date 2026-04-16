@@ -31,9 +31,8 @@ class HVServer:
         self.pub_socket = self.context.socket(zmq.PUB)
         self.pub_socket.bind(f"tcp://*:{self.pub_port}")
 
-        self.running     = True
-        self.hw_ready    = False   # True when hardware is connected and usable
-        self.hw_state    = "degraded"  # "operational" | "degraded"
+        self.running        = True
+        self.caen_connected = False   # True when hardware is connected and usable
         self.monitor_thread   = None
         self.reconnect_thread = None
         self.start_time  = time.monotonic()
@@ -62,8 +61,7 @@ class HVServer:
                     channels.append({"slot": int(slot), "channel": int(ch_idx)})
 
             self.channels = channels
-            self.hw_ready = True
-            self.hw_state = "operational"
+            self.caen_connected = True
             logging.info(
                 f"Hardware connected: {len(crate_map)} slots, "
                 f"{len(self.channels)} channels."
@@ -71,8 +69,7 @@ class HVServer:
             return True
 
         except Exception as e:
-            self.hw_ready = False
-            self.hw_state = "degraded"
+            self.caen_connected = False
             logging.warning(f"Hardware connection failed: {e}")
             return False
 
@@ -90,7 +87,7 @@ class HVServer:
             if not self.running:
                 break
 
-            if not self.hw_ready:
+            if not self.caen_connected:
                 logging.info("Retrying hardware connection...")
                 if self._connect_hardware():
                     # Restart monitor thread if not alive
@@ -136,7 +133,7 @@ class HVServer:
 
     def _monitor_loop(self):
         logging.debug("Monitor loop started (1 Hz)")
-        while self.running and self.hw_ready:
+        while self.running and self.caen_connected:
             data_list = []
             try:
                 for ch_info in self.channels:
@@ -154,8 +151,7 @@ class HVServer:
 
             except Exception as e:
                 self.error_count += 1
-                self.hw_ready = False
-                self.hw_state = "degraded"
+                self.caen_connected = False
                 logging.error(
                     f"Hardware communication lost (errors={self.error_count}): {e}. "
                     f"Entering degraded mode; reconnect thread will retry."
@@ -194,20 +190,18 @@ class HVServer:
 
         if method == "get_server_health":
             return {
-                "uptime_s":      time.monotonic() - self.start_time,
-                "hw_state":      self.hw_state,
-                "channel_count": len(self.channels),
-                "error_count":   self.error_count,
+                "uptime_s":       time.monotonic() - self.start_time,
+                "caen_connected": self.caen_connected,
+                "channel_count":  len(self.channels),
+                "error_count":    self.error_count,
             }
 
         if method == "get_channels":
             return self.channels
 
         # Hardware commands — blocked in degraded mode
-        if not self.hw_ready:
-            raise RuntimeError(
-                f"Server is in {self.hw_state} mode: hardware not connected"
-            )
+        if not self.caen_connected:
+            raise RuntimeError("Server is in DEGRADED mode: hardware not connected")
 
         if method == "turn_on":     return self.hv.turn_on(*params)
         if method == "turn_off":    return self.hv.turn_off(*params)

@@ -21,9 +21,16 @@ import logging
 import argparse
 import resource
 from datetime import datetime, timezone
-
 import hvconfig
 from hvclient import HVClient
+from hvchannel import load_hv_table
+
+try:
+    from influxdb_client import InfluxDBClient, Point
+    from influxdb_client.client.write_api import SYNCHRONOUS
+except ImportError:
+    print("influxdb_client not installed. Please run: pip install influxdb-client")
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -34,94 +41,77 @@ def db_connect():
     """
     Establish and return a connection / client object to the time-series DB.
     Called once at startup.
-
-    Return:
-        db  -- any object representing the DB session (or None for a dry run)
     """
-    # TODO: implement DB connection
-    # Example (InfluxDB v2):
-    #   from influxdb_client import InfluxDBClient
-    #   return InfluxDBClient(url=URL, token=TOKEN, org=ORG)
-    logging.warning(
-        "[DB] db_connect() not implemented — running in dry-run mode")
-    return None
-
+    try:
+        client = InfluxDBClient(
+            url=hvconfig.INFLUX_URL,
+            token=hvconfig.INFLUX_TOKEN,
+            org=hvconfig.INFLUX_ORG
+        )
+        return client
+    except Exception as e:
+        logging.error(f"[DB] Connection failed: {e}")
+        return None
 
 def db_write_channels(db, records: list[dict]):
-    """
-    Write per-channel telemetry records to the time-series DB.
-
-    Each record dict contains:
-        timestamp  (datetime, UTC)
-        slot       (int)
-        channel    (int)
-        vmon       (float)   Volts
-        imon       (float)   µA
-        status     (int)     raw bitmask
-        is_on      (bool)
-        is_ramping (bool)
-        is_ovc     (bool)
-        is_trip    (bool)
-    """
-    # TODO: implement channel DB write
-    pass
-
+    if not db: return
+    write_api = db.write_api(write_options=SYNCHRONOUS)
+    points = []
+    for r in records:
+        p = (Point("hv_channel")
+             .tag("slot", str(r["slot"]))
+             .tag("channel", str(r["channel"]))
+             .field("vmon", float(r["vmon"]))
+             .field("imon", float(r["imon"]))
+             .field("status", int(r["status"]))
+             .field("is_on", int(r["is_on"]))
+             .field("is_ramping", int(r["is_ramping"]))
+             .field("is_ovc", int(r["is_ovc"]))
+             .field("is_trip", int(r["is_trip"]))
+             .time(r["timestamp"]))
+        points.append(p)
+    try:
+        write_api.write(bucket=hvconfig.INFLUX_BUCKET, org=hvconfig.INFLUX_ORG, record=points)
+    except Exception as e:
+        logging.error(f"[DB] Failed to write channel data: {e}")
 
 def db_write_server_health(db, record: dict):
-    """
-    Write hvserver health metrics to the time-series DB.
-
-    record dict contains:
-        timestamp      (datetime, UTC)
-        server_status  (str)    "running" | "degraded" | "unreachable"
-        ping_ms        (float)  round-trip time in milliseconds (NaN if unreachable)
-        hw_state       (str)    "operational" | "degraded" | "" if unreachable
-        uptime_s       (float)  server process uptime in seconds (NaN if unreachable)
-        channel_count  (int)    number of discovered hardware channels (0 if unreachable)
-        error_count    (int)    cumulative hardware errors on server (0 if unreachable)
-    """
-    # TODO: implement server health DB write
-    # Example (InfluxDB):
-    #   p = (Point("hv_server")
-    #        .field("server_status",  record["server_status"])
-    #        .field("ping_ms",        record["ping_ms"])
-    #        .field("uptime_s",       record["uptime_s"])
-    #        .field("channel_count",  record["channel_count"])
-    #        .field("error_count",    record["error_count"])
-    #        .time(record["timestamp"]))
-    #   write_api.write(bucket=BUCKET, record=p)
-    pass
-
+    if not db: return
+    write_api = db.write_api(write_options=SYNCHRONOUS)
+    p = (Point("hv_server")
+         .field("server_connected", int(record["server_connected"]))
+         .field("ping_ms", float(record["ping_ms"]))
+         .field("uptime_s", float(record["uptime_s"]))
+         .field("channel_count", int(record["channel_count"]))
+         .field("error_count", int(record["error_count"]))
+         .time(record["timestamp"]))
+         
+    if record["caen_connected"] is not None:
+        p.field("caen_connected", int(record["caen_connected"]))
+        
+    try:
+        write_api.write(bucket=hvconfig.INFLUX_BUCKET, org=hvconfig.INFLUX_ORG, record=p)
+    except Exception as e:
+        logging.error(f"[DB] Failed to write server health: {e}")
 
 def db_write_logger_health(db, record: dict):
-    """
-    Write logger self-health metrics to the time-series DB.
-
-    record dict contains:
-        timestamp      (datetime, UTC)
-        logger_status  (str)    "running" | "degraded"
-        uptime_s       (float)  seconds since logger started
-        cycle_count    (int)    number of completed collection cycles
-        error_count    (int)    cumulative collection errors
-        mem_rss_mb     (float)  resident memory usage in MB
-    """
-    # TODO: implement logger self-health DB write
-    # Example (InfluxDB):
-    #   p = (Point("hv_logger")
-    #        .field("logger_status", record["logger_status"])
-    #        .field("uptime_s",      record["uptime_s"])
-    #        .field("cycle_count",   record["cycle_count"])
-    #        .field("error_count",   record["error_count"])
-    #        .field("mem_rss_mb",    record["mem_rss_mb"])
-    #        .time(record["timestamp"]))
-    #   write_api.write(bucket=BUCKET, record=p)
-    pass
-
+    if not db: return
+    write_api = db.write_api(write_options=SYNCHRONOUS)
+    p = (Point("hv_logger")
+         .field("uptime_s", float(record["uptime_s"]))
+         .field("cycle_count", int(record["cycle_count"]))
+         .field("error_count", int(record["error_count"]))
+         .field("mem_rss_mb", float(record["mem_rss_mb"]))
+         .time(record["timestamp"]))
+    try:
+        write_api.write(bucket=hvconfig.INFLUX_BUCKET, org=hvconfig.INFLUX_ORG, record=p)
+    except Exception as e:
+        logging.error(f"[DB] Failed to write logger health: {e}")
 
 def db_close(db):
-    """Close the DB connection / release resources."""
-    # TODO: implement DB close
-    pass
+    if db:
+        db.close()
+
 
 
 # ---------------------------------------------------------------------------
@@ -184,17 +174,12 @@ def get_mem_rss_mb() -> float:
     return usage.ru_maxrss / 1024
 
 
-def collect_and_write(client: HVClient, db,
-                      start_time: float, cycle_count: int, error_count: int,
-                      prev_alive: bool) -> bool:
+def collect_and_write(client, db, start_time, cycle_count, error_count, prev_alive, target_channels=None):
     """
-    One monitoring cycle:
-      1. Ping the server        → server health record
-      2. Poll channel telemetry → per-channel records
-      3. Report logger health   → self-health record
+    Executes one cycle of HV data collection and writes to DB.
 
     Returns:
-        alive (bool) — current server reachability (for transition tracking)
+        alive (bool) -- the server_connected state during this cycle
     """
     now = datetime.now(timezone.utc)
 
@@ -209,35 +194,36 @@ def collect_and_write(client: HVClient, db,
         client.latest_data = None   # clear stale telemetry
 
     server_record = {
-        "timestamp":     now,
-        "server_status": "unreachable",
-        "ping_ms":       ping_ms,
-        "hw_state":      "",
-        "uptime_s":      float('nan'),
-        "channel_count": 0,
-        "error_count":   0,
+        "timestamp":        now,
+        "server_connected": False,
+        "ping_ms":          ping_ms,
+        "caen_connected":   None,
+        "uptime_s":         float('nan'),
+        "channel_count":    0,
+        "error_count":      0,
     }
     if alive:
+        server_record["server_connected"] = True
         try:
             srv_health = client.send_command("get_server_health")
             hw_state = srv_health["hw_state"]
-            server_record["hw_state"]      = hw_state
-            server_record["uptime_s"]      = srv_health["uptime_s"]
-            server_record["channel_count"] = srv_health["channel_count"]
-            server_record["error_count"]   = srv_health["error_count"]
-            server_record["server_status"] = (
-                "running" if hw_state == "operational" else "degraded"
-            )
+            
+            caen_connected = (hw_state == "operational")
+            server_record["caen_connected"] = caen_connected
+            server_record["uptime_s"]       = srv_health["uptime_s"]
+            server_record["channel_count"]  = srv_health["channel_count"]
+            server_record["error_count"]    = srv_health["error_count"]
+            
+            status_str = "RUNNING" if caen_connected else "DEGRADED"
             logging.info(
-                f"Server {server_record['server_status']}  "
-                f"ping={ping_ms:.1f} ms  hw={hw_state}  "
+                f"Server {status_str}  "
+                f"ping={ping_ms:.1f} ms  caen_connected={caen_connected}  "
                 f"uptime={srv_health['uptime_s']:.0f}s  "
                 f"channels={srv_health['channel_count']}  "
                 f"errors={srv_health['error_count']}"
             )
         except Exception as e:
             logging.warning(f"get_server_health failed: {e}")
-            server_record["server_status"] = "degraded"
             logging.info(f"Server alive  ping={ping_ms:.1f} ms")
     else:
         logging.warning("Server unreachable  [DEGRADED MODE]")
@@ -249,6 +235,11 @@ def collect_and_write(client: HVClient, db,
         if data:
             channel_records = []
             for ch in data:
+                # If target_channels is provided, filter out unmapped channels
+                if target_channels is not None:
+                    if (ch["slot"], ch["channel"]) not in target_channels:
+                        continue
+
                 status = ch.get("status", 0)
                 record = {
                     "timestamp":  now,
@@ -274,21 +265,21 @@ def collect_and_write(client: HVClient, db,
             logging.warning("No telemetry data received from server.")
 
     # --- 3. Logger self-health ---
-    logger_status = "running" if alive else "degraded"
     uptime_s = time.monotonic() - start_time
     mem_mb = get_mem_rss_mb()
     logger_record = {
         "timestamp":     now,
-        "logger_status": logger_status,
         "uptime_s":      uptime_s,
         "cycle_count":   cycle_count,
         "error_count":   error_count,
         "mem_rss_mb":    mem_mb,
     }
+    log_status = "OK" if alive else "DEGRADED (Server Unreachable)"
     logging.info(
-        f"Logger {logger_status}  uptime={uptime_s:.0f}s  "
+        f"Logger {log_status}  uptime={uptime_s:.0f}s  "
         f"cycles={cycle_count}  errors={error_count}  mem={mem_mb:.1f} MB"
     )
+
     db_write_logger_health(db, logger_record)
 
     return alive
@@ -311,6 +302,8 @@ def main():
                         help=f"PID file path (default: {hvconfig.LOGGER_PID_FILE})")
     parser.add_argument("--log",      default=hvconfig.LOGGER_LOG_FILE,
                         help=f"Log file path (default: {hvconfig.LOGGER_LOG_FILE})")
+    parser.add_argument("--table",    default=hvconfig.HV_TABLE,
+                        help=f"Path to the channel configuration file (default: {hvconfig.HV_TABLE})")
     parser.add_argument("--debug",    action="store_true",
                         help="Enable debug logging")
     args = parser.parse_args()
@@ -318,6 +311,7 @@ def main():
     # Resolve file paths to absolute NOW (before daemonize chdir("/"))
     args.log = os.path.abspath(args.log)
     args.pid = os.path.abspath(args.pid)
+    args.table = os.path.abspath(args.table)
 
     # Logging setup
     log_level = logging.DEBUG if args.debug else logging.INFO
@@ -381,13 +375,27 @@ def main():
 
     # Main loop
     server_alive = False   # track server reachability across cycles
+    target_channels = set()
+    last_table_mtime = 0
+
     try:
         while running:
+            # Check if hv.table has been updated (hot reload)
+            try:
+                current_mtime = os.path.getmtime(args.table)
+                if current_mtime > last_table_mtime:
+                    channels_obj = load_hv_table(args.table)
+                    target_channels = {(ch.slot, ch.channel) for ch in channels_obj}
+                    last_table_mtime = current_mtime
+                    logging.info(f"Loaded {len(target_channels)} target valid channels from {args.table}")
+            except Exception as e:
+                logging.warning(f"Could not read {args.table}: {e}")
+
             try:
                 server_alive = collect_and_write(
                     client, db, start_time,
                     cycle_count, error_count,
-                    server_alive)
+                    server_alive, target_channels)
                 cycle_count += 1
             except Exception as e:
                 error_count += 1

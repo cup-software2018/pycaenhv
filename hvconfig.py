@@ -9,6 +9,7 @@ IP_ADDRESS = "172.16.2.51"
 SYSTEM_TYPE = SY4527
 USERNAME = "admin"
 PASSWORD = "admin"
+HV_TABLE = "hv.table"
 
 # ===========================================================================
 # ZeroMQ Communication Ports (hvserver ↔ clients)
@@ -31,6 +32,15 @@ LOGGER_PID_FILE = "hvlogger.pid"
 LOGGER_INTERVAL = 60.0   # polling interval in seconds
 
 # ===========================================================================
+# InfluxDB Settings (for hvlogger)
+# ===========================================================================
+INFLUX_URL    = "http://localhost:8086"
+INFLUX_TOKEN  = "your-influxdb-token"
+INFLUX_ORG    = "cups"
+INFLUX_BUCKET = "hv"
+
+
+# ===========================================================================
 # config.json override
 # ===========================================================================
 
@@ -40,12 +50,14 @@ def load_config(config_path="config.json"):
     Override default constants with values from a JSON file if it exists.
     All keys are optional; only the ones present in the file will be overridden.
     """
-    global IP_ADDRESS, SYSTEM_TYPE, USERNAME, PASSWORD
+    global IP_ADDRESS, SYSTEM_TYPE, USERNAME, PASSWORD, HV_TABLE
     global CMD_PORT, PUB_PORT
-    global SERVER_LOG_FILE, SERVER_PID_FILE
+    global SERVER_LOG_FILE, SERVER_PID_FILE, RECONNECT_INTERVAL
     global LOGGER_LOG_FILE, LOGGER_PID_FILE, LOGGER_INTERVAL
+    global INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET
 
     if not os.path.exists(config_path):
+
         return False
 
     try:
@@ -61,6 +73,8 @@ def load_config(config_path="config.json"):
             USERNAME = cfg["USERNAME"]
         if "PASSWORD" in cfg:
             PASSWORD = cfg["PASSWORD"]
+        if "HV_TABLE" in cfg:
+            HV_TABLE = cfg["HV_TABLE"]
 
         # Ports
         if "CMD_PORT" in cfg:
@@ -84,7 +98,18 @@ def load_config(config_path="config.json"):
         if "LOGGER_INTERVAL" in cfg:
             LOGGER_INTERVAL = float(cfg["LOGGER_INTERVAL"])
 
+        # InfluxDB
+        if "INFLUX_URL" in cfg:
+            INFLUX_URL = cfg["INFLUX_URL"]
+        if "INFLUX_TOKEN" in cfg:
+            INFLUX_TOKEN = cfg["INFLUX_TOKEN"]
+        if "INFLUX_ORG" in cfg:
+            INFLUX_ORG = cfg["INFLUX_ORG"]
+        if "INFLUX_BUCKET" in cfg:
+            INFLUX_BUCKET = cfg["INFLUX_BUCKET"]
+
         print(f"[hvconfig] Configuration loaded from {config_path}")
+
         return True
     except Exception as e:
         print(f"[hvconfig] Failed to load {config_path}: {e}")

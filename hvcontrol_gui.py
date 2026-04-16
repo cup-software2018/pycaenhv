@@ -13,31 +13,8 @@ from datetime import datetime
 # Import hardware control modules
 import hvconfig
 from hvclient import HVClient
-from hvchannel import HVChannel
+from hvchannel import HVChannel, load_hv_table
 
-
-def load_hv_table(filepath):
-    """
-    Parses the HV configuration table from a text file.
-    """
-    channels = []
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"File not found: {filepath}")
-
-    with open(filepath, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-
-            parts = line.split()
-            if len(parts) >= 7:
-                ch = HVChannel(
-                    name=parts[0], slot=parts[1], channel=parts[2],
-                    hv_set=parts[3], r_val=parts[4], pmtid=parts[5], group=parts[6]
-                )
-                channels.append(ch)
-    return channels
 
 
 class HVControlApp(QMainWindow):
@@ -69,7 +46,7 @@ class HVControlApp(QMainWindow):
         self._clock_timer.start(1000)
 
         # Track server hardware state for dynamic control enable/disable
-        self._hw_state = "degraded"   # "operational" | "degraded"
+        self.caen_connected = False
         self._health_fail_count = 0   # consecutive get_server_health failures
         self._HEALTH_FAIL_MAX = 3     # disconnect after this many consecutive failures
 
@@ -80,7 +57,7 @@ class HVControlApp(QMainWindow):
 
         # --- First Row: File Selection Area ---
         file_layout = QHBoxLayout()
-        self.file_input = QLineEdit("hv.table")
+        self.file_input = QLineEdit(hvconfig.HV_TABLE)
         self.file_input.setReadOnly(True)
         self.btn_browse = QPushButton("Browse...")
         self.btn_browse.clicked.connect(self.browse_file)
@@ -249,11 +226,11 @@ class HVControlApp(QMainWindow):
             # Fetch server hardware state
             try:
                 health = self.client.get_server_health()
-                self._hw_state = health.get("hw_state", "degraded")
+                self.caen_connected = health.get("caen_connected", False)
             except Exception:
-                self._hw_state = "degraded"
+                self.caen_connected = False
 
-            if self._hw_state == "operational":
+            if self.caen_connected:
                 # Full connect: sync settings then start monitoring
                 try:
                     self._sync_hardware_settings()
@@ -277,13 +254,13 @@ class HVControlApp(QMainWindow):
 
             self.is_connected = True
             self.btn_connect.setText("Disconnect")
-            self._set_hw_operational(self._hw_state == "operational")
+            self._set_hw_operational(self.caen_connected)
             self.monitor_timer.start(1000)
 
         else:
             self.monitor_timer.stop()
             self.is_connected = False
-            self._hw_state = "degraded"
+            self.caen_connected = False
             self._health_fail_count = 0
             self.btn_connect.setText("Connect")
             self.btn_on.setEnabled(False)
@@ -291,7 +268,7 @@ class HVControlApp(QMainWindow):
             self.statusBar().showMessage("Disconnected")
 
     def on_item_changed(self, item):
-        if not self.is_connected or self._hw_state != "operational":
+        if not self.is_connected or not self.caen_connected:
             return
 
         col = item.column()
@@ -379,7 +356,7 @@ class HVControlApp(QMainWindow):
             # --- Check server hw_state every cycle ---
             try:
                 health = self.client.get_server_health()
-                new_hw_state = health.get("hw_state", "degraded")
+                new_caen_connected = health.get("caen_connected", False)
                 self._health_fail_count = 0   # reset on success
             except Exception:
                 self._health_fail_count += 1
@@ -392,11 +369,11 @@ class HVControlApp(QMainWindow):
                         f"Server did not respond {self._HEALTH_FAIL_MAX} times in a row.")
                 return   # transient failure — try again next tick
 
-            if new_hw_state != self._hw_state:
-                self._hw_state = new_hw_state
-                self._set_hw_operational(new_hw_state == "operational")
+            if new_caen_connected != self.caen_connected:
+                self.caen_connected = new_caen_connected
+                self._set_hw_operational(new_caen_connected)
                 host = self.host_input.text().strip()
-                if new_hw_state == "operational":
+                if new_caen_connected:
                     # Hardware just recovered: push table settings now
                     try:
                         self._sync_hardware_settings()

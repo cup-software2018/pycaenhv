@@ -4,29 +4,9 @@ import sys
 import argparse
 from datetime import datetime
 from hvclient import HVClient
-from hvchannel import HVChannel
+from hvchannel import HVChannel, load_hv_table
 import hvconfig
 
-
-def load_hv_table(filepath):
-    channels = []
-    try:
-        with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                parts = line.split()
-                if len(parts) >= 7:
-                    ch = HVChannel(
-                        name=parts[0], slot=parts[1], channel=parts[2],
-                        hv_set=parts[3], r_val=parts[4], pmtid=parts[5], group=parts[6]
-                    )
-                    channels.append(ch)
-    except FileNotFoundError:
-        print(f"Error: Could not find {filepath}")
-        sys.exit(1)
-    return channels
 
 
 def sync_hardware(client, channels, group="all"):
@@ -57,9 +37,9 @@ def sync_hardware(client, channels, group="all"):
 def _server_status_str(client) -> str:
     """Return a one-word server status for display in the monitor header."""
     try:
-        health = client.get_server_health()
-        hw = health.get("hw_state", "degraded")
-        return "RUNNING" if hw == "operational" else "DEGRADED (waiting CAEN)"
+        health = client.get_server_health(timeout_ms=500)
+        caen_connected = health.get("caen_connected", False)
+        return "RUNNING" if caen_connected else "DEGRADED (waiting CAEN)"
     except Exception:
         return "UNREACHABLE"
 
@@ -117,8 +97,8 @@ def main():
     # Optional arguments
     parser.add_argument("-g", "--group", default="all",
                         help="Target group name from the table (default: all)")
-    parser.add_argument("-t", "--table", default="hv.table",
-                        help=f"Path to the HV configuration table file (default: hv.table)")
+    parser.add_argument("-t", "--table", default=hvconfig.HV_TABLE,
+                        help=f"Path to the HV configuration table file (default: {hvconfig.HV_TABLE})")
 
     args = parser.parse_args()
 
@@ -132,14 +112,14 @@ def main():
         client.close()
         sys.exit(1)
 
-    # 3. Get server health to determine hw_state
+    # 3. Get server health to determine hardware connectivity
     try:
         health   = client.get_server_health()
-        hw_state = health.get("hw_state", "degraded")
+        caen_connected = health.get("caen_connected", False)
     except Exception:
-        hw_state = "degraded"
+        caen_connected = False
 
-    if hw_state == "operational":
+    if caen_connected:
         # 4a. Sync hardware settings and execute action
         sync_hardware(client, fChannels, args.group)
     else:
