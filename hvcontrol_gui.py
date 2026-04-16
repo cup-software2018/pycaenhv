@@ -188,6 +188,7 @@ class HVControlApp(QMainWindow):
 
     def filter_table(self):
         selected_group = self.group_combo.currentText()
+        self.table.blockSignals(True)   # Prevent on_item_changed during table rebuild
         self.table.setRowCount(0)
 
         is_filtering = (selected_group != "All")
@@ -224,6 +225,7 @@ class HVControlApp(QMainWindow):
                 self.table.setItem(row, col, item)
 
             self.table.item(row, 0).setData(Qt.UserRole, ch)
+        self.table.blockSignals(False)
 
     def toggle_connection(self):
         if not self.is_connected:
@@ -289,7 +291,7 @@ class HVControlApp(QMainWindow):
             self.statusBar().showMessage("Disconnected")
 
     def on_item_changed(self, item):
-        if not self.is_connected:
+        if not self.is_connected or self._hw_state != "operational":
             return
 
         col = item.column()
@@ -411,6 +413,7 @@ class HVControlApp(QMainWindow):
             if not data:
                 return
 
+            self.table.blockSignals(True)  # Block signals while updating from monitor
             for row in range(self.table.rowCount()):
                 ch = self.table.item(row, 0).data(Qt.UserRole)
                 ch_update = next((d for d in data if d["slot"] == int(
@@ -445,6 +448,7 @@ class HVControlApp(QMainWindow):
                     status_item = self.table.item(row, 7)
                     status_item.setText(state_str)
                     status_item.setForeground(state_color)
+            self.table.blockSignals(False)
 
         except RuntimeError as e:
             self.monitor_timer.stop()
