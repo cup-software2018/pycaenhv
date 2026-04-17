@@ -35,13 +35,14 @@ def sync_hardware(client, channels, group="all"):
 
 
 def _server_status_str(client) -> str:
-    """Return a one-word server status for display in the monitor header."""
+    """Return a combined server and hardware status string for display."""
     try:
         health = client.get_server_health(timeout_ms=500)
         caen_connected = health.get("caen_connected", False)
-        return "RUNNING" if caen_connected else "DEGRADED (waiting CAEN)"
+        hw_str = "ON" if caen_connected else "OFF (waiting)"
+        return f"Server: ON  |  CAEN Hardware: {hw_str}"
     except Exception:
-        return "UNREACHABLE"
+        return "Server: OFF (Unreachable)  |  CAEN Hardware: UNKNOWN"
 
 
 def _monitor_loop(stdscr, client, channels, group):
@@ -51,8 +52,8 @@ def _monitor_loop(stdscr, client, channels, group):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         status  = _server_status_str(client)
         stdscr.addstr(
-            f"=== HV Monitoring: Group '{group}'  [{now_str}]"
-            f"  Server: {status}  (Press 'q' to stop) ===\n\n")
+            f"=== HV Monitoring: Group '{group}'  [{now_str}] ===\n"
+            f"=== {status}   (Press 'q' to stop) ===\n\n")
 
         # Pull latest raw data from server
         raw_data = client.poll_data()

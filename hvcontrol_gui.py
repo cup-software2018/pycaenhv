@@ -239,13 +239,13 @@ class HVControlApp(QMainWindow):
                         self, "Sync Error", f"Failed to push settings to server:\n{e}")
                     return
                 self.statusBar().showMessage(
-                    f"Server: RUNNING  ({host}:{hvconfig.CMD_PORT})")
+                    f"Server: ON  |  CAEN Hardware: ON  ({host}:{hvconfig.CMD_PORT})")
                 QMessageBox.information(self, "Connected",
                                         "Connected and synchronized with HV Server.")
             else:
                 # Degraded: monitoring only, skip sync
                 self.statusBar().showMessage(
-                    f"Server: DEGRADED (waiting CAEN)  ({host}:{hvconfig.CMD_PORT})")
+                    f"Server: ON  |  CAEN Hardware: OFF (waiting)  ({host}:{hvconfig.CMD_PORT})")
                 QMessageBox.warning(
                     self, "Server Degraded",
                     "HV server is running but hardware is not connected.\n"
@@ -362,7 +362,7 @@ class HVControlApp(QMainWindow):
                 self._health_fail_count += 1
                 host = self.host_input.text().strip()
                 self.statusBar().showMessage(
-                    f"Server: UNREACHABLE  ({host})  "
+                    f"Server: OFF (Unreachable) | CAEN: UNKNOWN ({host}) "
                     f"(retry {self._health_fail_count}/{self._HEALTH_FAIL_MAX})")
                 if self._health_fail_count >= self._HEALTH_FAIL_MAX:
                     raise RuntimeError(
@@ -380,10 +380,10 @@ class HVControlApp(QMainWindow):
                     except Exception:
                         pass
                     self.statusBar().showMessage(
-                        f"Server: RUNNING  ({host}:{hvconfig.CMD_PORT})")
+                        f"Server: ON  |  CAEN Hardware: ON  ({host}:{hvconfig.CMD_PORT})")
                 else:
                     self.statusBar().showMessage(
-                        f"Server: DEGRADED (waiting CAEN)  ({host}:{hvconfig.CMD_PORT})")
+                        f"Server: ON  |  CAEN Hardware: OFF (waiting)  ({host}:{hvconfig.CMD_PORT})")
 
             # --- Poll telemetry ---
             data = self.client.poll_data()
