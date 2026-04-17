@@ -13,9 +13,11 @@ class HVClient:
         # Save URL for reconnection in case of timeout
         self.context = zmq.Context()
         self.cmd_socket = self.context.socket(zmq.REQ)
+        self.cmd_socket.setsockopt(zmq.LINGER, 0)
         self.cmd_socket.connect(self.cmd_url)
 
         self.sub_socket = self.context.socket(zmq.SUB)
+        self.sub_socket.setsockopt(zmq.LINGER, 0)
         self.sub_socket.connect(self.sub_url)
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
 
@@ -40,6 +42,7 @@ class HVClient:
                 # Recreate socket to clear the blocked REQ state
                 self.cmd_socket.close()
                 self.cmd_socket = self.context.socket(zmq.REQ)
+                self.cmd_socket.setsockopt(zmq.LINGER, 0)
                 self.cmd_socket.connect(self.cmd_url)
                 return False
         except Exception:
@@ -76,6 +79,7 @@ class HVClient:
             # Recreate the REQ socket to recover from timeout state
             self.cmd_socket.close()
             self.cmd_socket = self.context.socket(zmq.REQ)
+            self.cmd_socket.setsockopt(zmq.LINGER, 0)
             self.cmd_socket.connect(self.cmd_url)
             raise TimeoutError(
                 f"Server did not respond to '{method}' within {timeout_ms}ms")

@@ -479,8 +479,10 @@ class HVControlApp(QMainWindow):
             i_limit = i_set * 1.1
 
             # Push to server
-            self.client.send_command("set_name", int(
-                ch.slot), int(ch.channel), ch.name)
+            try:
+                self.client.send_command("set_name", int(ch.slot), int(ch.channel), ch.name)
+            except Exception:
+                pass
             self.client.send_command("set_vset", int(
                 ch.slot), int(ch.channel), float(ch.hv_set))
             self.client.send_command("set_iset", int(

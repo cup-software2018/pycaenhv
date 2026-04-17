@@ -252,15 +252,15 @@ class CaenHV:
 
     def set_name(self, slot, channel, name):
         # Set Channel Name
-        # Note: Some boards return 'System configuration is change' when Name
-        # parameter is not supported. This is a known hardware limitation and
-        # is silently ignored.
+        # Note: Some boards do not fully support the Name parameter.
         try:
             self.set_ch_param(slot, channel, "Name", name, param_type='string')
         except Exception as e:
-            if "System configuration" in str(e) or "not supported" in str(e).lower():
-                return  # Board does not support Name writes; skip silently
-            raise  # Re-raise any other unexpected error
+            err_str = str(e).lower()
+            if "system configuration" in err_str or "not supported" in err_str or err_str.endswith(": ok"):
+                return  # Hardware limitation; skip silently
+            import logging
+            logging.warning(f"Ignored non-critical error while setting Name: {e}")
 
     def get_status(self, slot, channel):
         # Get Channel Status (Status is returned as an integer bitmask)
