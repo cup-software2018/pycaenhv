@@ -239,13 +239,13 @@ class HVControlApp(QMainWindow):
                         self, "Sync Error", f"Failed to push settings to server:\n{e}")
                     return
                 self.statusBar().showMessage(
-                    f"Server: ON  |  CAEN Hardware: ON  ({host}:{hvconfig.CMD_PORT})")
+                    f"Server: ON  ({host}:{hvconfig.CMD_PORT}) |  CAEN Hardware: ON")
                 QMessageBox.information(self, "Connected",
                                         "Connected and synchronized with HV Server.")
             else:
                 # Degraded: monitoring only, skip sync
                 self.statusBar().showMessage(
-                    f"Server: ON  |  CAEN Hardware: OFF (waiting)  ({host}:{hvconfig.CMD_PORT})")
+                    f"Server: ON  ({host}:{hvconfig.CMD_PORT}) |  CAEN Hardware: OFF (waiting)")
                 QMessageBox.warning(
                     self, "Server Degraded",
                     "HV server is running but hardware is not connected.\n"
