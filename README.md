@@ -157,6 +157,20 @@ kill $(cat hvlogger.pid)                         # graceful stop
 Open `hvlogger.py` and fill in the DB connection logic inside the stub functions. The logger records standardized health structures:
 - **Server Health**: Logs boolean values for `server_connected` (ZMQ ping success) and `caen_connected` (Hardware interface operational). If `server_connected` is False, `caen_connected` is implicitly `None` (Unknown).
 - **Logger Health**: Logs internal metrics (Uptime, Memory RSS, Error counts) indicating the logger daemon itself is alive.
-## 6. Communications Protocol
-- **CMD Port (5555)**: ZMQ REQ/REP — explicit commands (turn on, set voltage, ping).
-- **PUB Port (5556)**: ZMQ PUB/SUB — 1 Hz telemetry broadcast (VMon, IMon, Status per channel).
+
+## 6. Standalone Channel Tweaking (`hvtweak.py`)
+For hardware calibrations and quick checks, `hvtweak.py` communicates directly with the CAEN crate (bypassing `hvserver.py`) to control a single channel. It is entirely standalone.
+```bash
+# Read current channel status (e.g., slot 0, ch 5)
+python hvtweak.py 0 5
+
+# Set Voltage to 1500 V and Current Limit to 500 uA
+python hvtweak.py 0 5 -V 1500 -I 500
+
+# Turn ON and set Voltage simultaneously
+python hvtweak.py 0 5 -V 2000 --on
+
+# Advanced options (run fully independent from config.json)
+python hvtweak.py 0 5 -V 100 --on -a 192.168.1.100 -t 2 -u admin -p admin
+```
+
