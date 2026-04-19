@@ -62,7 +62,11 @@ def load_config(config_path="config.json"):
 
     try:
         with open(config_path, 'r') as f:
-            cfg = json.load(f)
+            lines = f.readlines()
+            
+        # Strip // comments to support user-friendly json config files
+        json_str = "\n".join([line.split("//")[0] for line in lines])
+        cfg = json.loads(json_str)
 
         # Hardware
         if "IP_ADDRESS" in cfg:

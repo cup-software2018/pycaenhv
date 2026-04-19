@@ -61,6 +61,8 @@ Create a `config.json` in the project root to override any setting without modif
 {
   "IP_ADDRESS": "172.16.2.51",
   "SYSTEM_TYPE": 2,
+  "USERNAME": "admin",
+  "PASSWORD": "admin",
   "CMD_PORT": 5555,
   "PUB_PORT": 5556,
   "SERVER_LOG_FILE": "hvserver.log",
