@@ -5,7 +5,7 @@
 import argparse
 import sys
 import time
-from caenhv import CAENHV
+from caenhv import CaenHV
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
         if args.verbose:
             print(*a, **kw)
 
-    hv = CAENHV()
+    hv = CaenHV()
     vprint(f"Connecting directly to CAEN Crate at {args.ip}...")
     try:
         hv.init_system(args.type, args.ip, args.user, args.passw)
@@ -80,24 +80,24 @@ def main():
         if no_action or args.verbose:
             vprint("Reading latest telemetry from hardware...")
             vmon = hv.get_ch_param(args.slot, args.channel, "VMon")
-        imon = hv.get_ch_param(args.slot, args.channel, "IMon")
-        status_val = hv.get_status(args.slot, args.channel)
+            imon = hv.get_ch_param(args.slot, args.channel, "IMon")
+            status_val = hv.get_status(args.slot, args.channel)
 
-        is_on = bool(status_val & (1 << 0))
-        is_ramping = bool(status_val & ((1 << 1) | (1 << 2)))
-        is_trip = bool(status_val & (1 << 8))
+            is_on = bool(status_val & (1 << 0))
+            is_ramping = bool(status_val & ((1 << 1) | (1 << 2)))
+            is_trip = bool(status_val & (1 << 8))
 
-        state = "RUNNING/ON" if is_on else "OFF"
-        if is_trip:
-            state = "TRIPPED"
-        elif is_ramping:
-            state = "RAMPING"
+            state = "RUNNING/ON" if is_on else "OFF"
+            if is_trip:
+                state = "TRIPPED"
+            elif is_ramping:
+                state = "RAMPING"
 
-        vprint(f"\n--- Current Status of [S:{args.slot} C:{args.channel}] ---")
-        vprint(f" State: {state} (Raw status int: {status_val})")
-        vprint(f" VMon:  {vmon:.2f} V")
-        vprint(f" IMon:  {imon:.2f} uA")
-        vprint("-----------------------------------------")
+            vprint(f"\n--- Current Status of [S:{args.slot} C:{args.channel}] ---")
+            vprint(f" State: {state} (Raw status int: {status_val})")
+            vprint(f" VMon:  {vmon:.2f} V")
+            vprint(f" IMon:  {imon:.2f} uA")
+            vprint("-----------------------------------------")
 
     except Exception as e:
         print(f"Execution Error: {e}")
