@@ -15,15 +15,17 @@ This project uses a **ZeroMQ-based Server-Client architecture** to allow multipl
 
 ## 2. File Structure
 - `caenhv.py`: Core hardware interface wrapping `CAENHVWrapper` via `ctypes`. Supports dynamic crate map discovery.
+- `hvchannel.py`: Shared data model for individual channel parameters.
 - `hvconfig.py`: Centralized configuration for all services (hardware settings, ZMQ ports, service file paths).
 - `hvserver.py`: Central background service. Manages the direct CAEN hardware connection and ZeroMQ sockets.
 - `hvclient.py`: Shared ZMQ communication library used by CLI, GUI, and logger.
+- `hvlogger.py`: Slow-control logger. Polls server telemetry and writes to a time-series DB (stubs provided).
 - `hvcontrol.py`: CLI client for table-based monitoring and control.
 - `hvcontrol_gui.py`: GUI client with remote server address selection and interactive table editing.
-- `hvlogger.py`: Slow-control logger. Polls server telemetry and writes to a time-series DB (stubs provided).
+- `hvtweak.py`: Standalone CLI tool to directly control a single CAEN channel (bypasses server daemon).
 - `caenprobe.py`: Standalone diagnostic tool to inspect active CAEN slots and channels.
-- `hvchannel.py`: Shared data model for individual channel parameters.
 - `hv.table`: (User-provided) Configuration file for channel-to-detector mapping.
+- `config.json`: (User-provided) Primary configuration file for system settings (IP, User, InfluxDB, etc.).
 
 ## 3. Prerequisites
 
@@ -56,28 +58,34 @@ All defaults are defined in `hvconfig.py`, organized by service:
 | Logger service | `LOGGER_LOG_FILE`, `LOGGER_PID_FILE`, `LOGGER_INTERVAL` |
 | InfluxDB | `INFLUX_URL`, `INFLUX_TOKEN`, `INFLUX_ORG`, `INFLUX_BUCKET` |
 
-Create a `config.json` in the project root to override any setting without modifying source code:
+Create a `config.json` in the project root to override any setting without modifying source code. Note that inline `//` comments are fully supported by the config loader!
 ```json
 {
-  "IP_ADDRESS": "172.16.2.51",
-  "SYSTEM_TYPE": 2,
-  "USERNAME": "admin",
-  "PASSWORD": "admin",
-  "CMD_PORT": 5555,
-  "PUB_PORT": 5556,
+  // ================= CAEN Hardware Connection =================
+  "IP_ADDRESS": "172.16.2.51",              // CAEN Crate IP Address
+  "SYSTEM_TYPE": 2,                         // 2 = SY4527, 3 = SY5527, 6 = N1470
+  "USERNAME": "admin",                      // CAEN Crate Login Username
+  "PASSWORD": "admin",                      // CAEN Crate Login Password
+
+  // ================= ZeroMQ Communication Ports ===============
+  "CMD_PORT": 5555,                         // Request/Reply port for commands
+  "PUB_PORT": 5556,                         // Publisher port for telemetry data
+
+  // ================= Server / Logger daemon settings ==========
   "SERVER_LOG_FILE": "hvserver.log",
   "SERVER_PID_FILE": "hvserver.pid",
   "RECONNECT_INTERVAL": 30.0,
   "LOGGER_LOG_FILE": "hvlogger.log",
   "LOGGER_PID_FILE": "hvlogger.pid",
   "LOGGER_INTERVAL": 60.0,
-  "INFLUX_URL": "http://localhost:8086",
-  "INFLUX_TOKEN": "your-influxdb-token",
-  "INFLUX_ORG": "cups",
-  "INFLUX_BUCKET": "hv"
+
+  // ================= InfluxDB Configuration ===================
+  "INFLUX_URL": "https://influxdb.amore2.yemilab.kr", // InfluxDB API Endpoint
+  "INFLUX_TOKEN": "your-influxdb-token",              // DB Auth Token
+  "INFLUX_ORG": "AMoRE2",                             // InfluxDB Organization
+  "INFLUX_BUCKET": "HV"                               // InfluxDB Bucket name
 }
 ```
-*(System Type: 2 = SY4527, 3 = SY5527, 6 = N1470)*
 
 ### `hv.table` Format
 Space-delimited text file mapping detector channels:
@@ -113,6 +121,7 @@ kill $(cat hvserver.pid)                        # graceful stop
 ### Step 2: Connect a Client
 
 #### CLI (`hvcontrol.py`)
+*Note: The CLI distinctly reports both ZMQ Server connectivity and CAEN Hardware connectivity.*
 ```bash
 python hvcontrol.py mon -t hv.table          # monitor all channels
 python hvcontrol.py on  -g 10 -t hv.table   # power ON group 10, then monitor
@@ -121,6 +130,7 @@ python hvcontrol.py off -t hv.table          # power OFF all, then monitor
 *Press `q` to exit the monitoring dashboard.*
 
 #### GUI (`hvcontrol_gui.py`)
+*Note: The GUI distinctly reports both ZMQ Server connectivity and CAEN Hardware connectivity in the bottom status bar.*
 ```bash
 python hvcontrol_gui.py
 ```
@@ -133,7 +143,8 @@ python hvcontrol_gui.py
    - **Group Control**: Use the **Group Filter** dropdown and **Power ON / OFF** buttons.
 
 ### Step 3: Start the Logger (`hvlogger.py`)
-The logger runs independently and periodically records telemetry to a time-series DB.
+The logger runs independently and periodically records telemetry natively to InfluxDB. 
+It uses `hv.table` to selectively filter and record only active channels. It also supports **hot-reloading**: if `hv.table` is modified, the logger automatically detects the change and updates its tracking without needing a restart.
 
 ```bash
 # Foreground test (10 s interval, debug output)
@@ -153,8 +164,8 @@ tail -f hvlogger.log                             # watch log
 kill $(cat hvlogger.pid)                         # graceful stop
 ```
 
-**Implementing DB writes:**
-Open `hvlogger.py` and fill in the DB connection logic inside the stub functions. The logger records standardized health structures:
+**DB Writes and Health monitoring:**
+The logger uses the official `influxdb-client` package. It records standardized data and health structures:
 - **Server Health**: Logs boolean values for `server_connected` (ZMQ ping success) and `caen_connected` (Hardware interface operational). If `server_connected` is False, `caen_connected` is implicitly `None` (Unknown).
 - **Logger Health**: Logs internal metrics (Uptime, Memory RSS, Error counts) indicating the logger daemon itself is alive.
 
