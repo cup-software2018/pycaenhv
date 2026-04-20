@@ -64,8 +64,17 @@ def load_config(config_path="config.json"):
         with open(config_path, 'r') as f:
             lines = f.readlines()
             
-        # Strip // comments to support user-friendly json config files
-        json_str = "\n".join([line.split("//")[0] for line in lines])
+        # Safely strip # comments
+        cleaned = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if " #" in line:
+                line = line.split(" #")[0]
+            cleaned.append(line)
+            
+        json_str = "\n".join(cleaned)
         cfg = json.loads(json_str)
 
         # Hardware

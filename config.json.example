@@ -1,27 +1,27 @@
 {
-  // ================= CAEN Hardware Connection =================
-  "IP_ADDRESS": "",              // CAEN Crate IP Address
-  "SYSTEM_TYPE": 2,                         // 2 = SY4527, 3 = SY5527
-  "USERNAME": "admin",                      // CAEN Crate Login Username
-  "PASSWORD": "admin",                      // CAEN Crate Login Password
+  # ================= CAEN Hardware Connection =================
+  "IP_ADDRESS": "",                        # CAEN Crate IP Address
+  "SYSTEM_TYPE": 2,                        # 2 = SY4527, 3 = SY5527
+  "USERNAME": "admin",                     # CAEN Crate Login Username
+  "PASSWORD": "admin",                     # CAEN Crate Login Password
 
-  // ================= ZeroMQ Communication Ports ===============
-  "CMD_PORT": 5555,                         // Request/Reply port for commands
-  "PUB_PORT": 5556,                         // Publisher port for telemetry data
+  # ================= ZeroMQ Communication Ports ===============
+  "CMD_PORT": 5555,                        # Request/Reply port for commands
+  "PUB_PORT": 5556,                        # Publisher port for telemetry data
 
-  // ================= Server daemon settings ===================
-  "SERVER_LOG_FILE": "hvserver.log",        // Server log file path
-  "SERVER_PID_FILE": "hvserver.pid",        // Server daemon PID file path
-  "RECONNECT_INTERVAL": 30.0,               // Seconds to wait before retrying CAEN connection
+  # ================= Server daemon settings ===================
+  "SERVER_LOG_FILE": "hvserver.log",       # Server log file path
+  "SERVER_PID_FILE": "hvserver.pid",       # Server daemon PID file path
+  "RECONNECT_INTERVAL": 30.0,              # Seconds to wait before retrying CAEN connection
 
-  // ================= Logger daemon settings ===================
-  "LOGGER_LOG_FILE": "hvlogger.log",        // Logger log file path
-  "LOGGER_PID_FILE": "hvlogger.pid",        // Logger daemon PID file path
-  "LOGGER_INTERVAL": 60.0,                  // Telemetry polling and DB write interval (seconds)
+  # ================= Logger daemon settings ===================
+  "LOGGER_LOG_FILE": "hvlogger.log",       # Logger log file path
+  "LOGGER_PID_FILE": "hvlogger.pid",       # Logger daemon PID file path
+  "LOGGER_INTERVAL": 60.0,                 # Telemetry polling and DB write interval (seconds)
 
-  // ================= InfluxDB Configuration ===================
-  "INFLUX_URL": "",                        // InfluxDB API Endpoint
-  "INFLUX_TOKEN": "",                      // DB Auth Token
-  "INFLUX_ORG": "",                        // InfluxDB Organization
-  "INFLUX_BUCKET": ""                      // InfluxDB Bucket name
+  # ================= InfluxDB Configuration ===================
+  "INFLUX_URL": "",                        # InfluxDB API Endpoint
+  "INFLUX_TOKEN": "",                      # DB Auth Token
+  "INFLUX_ORG": "",                        # InfluxDB Organization
+  "INFLUX_BUCKET": ""                      # InfluxDB Bucket name
 }

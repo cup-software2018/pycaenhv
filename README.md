@@ -58,20 +58,20 @@ All defaults are defined in `hvconfig.py`, organized by service:
 | Logger service | `LOGGER_LOG_FILE`, `LOGGER_PID_FILE`, `LOGGER_INTERVAL` |
 | InfluxDB | `INFLUX_URL`, `INFLUX_TOKEN`, `INFLUX_ORG`, `INFLUX_BUCKET` |
 
-Create a `config.json` in the project root to override any setting without modifying source code. Note that inline `//` comments are fully supported by the config loader!
+Create a `config.json` in the project root to override any setting without modifying source code. Note that inline `#` comments are fully supported by the config loader!
 ```json
 {
-  // ================= CAEN Hardware Connection =================
-  "IP_ADDRESS": "172.16.2.51",              // CAEN Crate IP Address
-  "SYSTEM_TYPE": 2,                         // 2 = SY4527, 3 = SY5527, 6 = N1470
-  "USERNAME": "admin",                      // CAEN Crate Login Username
-  "PASSWORD": "admin",                      // CAEN Crate Login Password
+  # ================= CAEN Hardware Connection =================
+  "IP_ADDRESS": "172.16.2.51",              # CAEN Crate IP Address
+  "SYSTEM_TYPE": 2,                         # 2 = SY4527, 3 = SY5527, 6 = N1470
+  "USERNAME": "admin",                      # CAEN Crate Login Username
+  "PASSWORD": "admin",                      # CAEN Crate Login Password
 
-  // ================= ZeroMQ Communication Ports ===============
-  "CMD_PORT": 5555,                         // Request/Reply port for commands
-  "PUB_PORT": 5556,                         // Publisher port for telemetry data
+  # ================= ZeroMQ Communication Ports ===============
+  "CMD_PORT": 5555,                         # Request/Reply port for commands
+  "PUB_PORT": 5556,                         # Publisher port for telemetry data
 
-  // ================= Server / Logger daemon settings ==========
+  # ================= Server / Logger daemon settings ==========
   "SERVER_LOG_FILE": "hvserver.log",
   "SERVER_PID_FILE": "hvserver.pid",
   "RECONNECT_INTERVAL": 30.0,
@@ -79,11 +79,11 @@ Create a `config.json` in the project root to override any setting without modif
   "LOGGER_PID_FILE": "hvlogger.pid",
   "LOGGER_INTERVAL": 60.0,
 
-  // ================= InfluxDB Configuration ===================
-  "INFLUX_URL": "https://influxdb.amore2.yemilab.kr", // InfluxDB API Endpoint
-  "INFLUX_TOKEN": "your-influxdb-token",              // DB Auth Token
-  "INFLUX_ORG": "AMoRE2",                             // InfluxDB Organization
-  "INFLUX_BUCKET": "HV"                               // InfluxDB Bucket name
+  # ================= InfluxDB Configuration ===================
+  "INFLUX_URL": "https://influxdb.amore2.yemilab.kr", # InfluxDB API Endpoint
+  "INFLUX_TOKEN": "your-influxdb-token",              # DB Auth Token
+  "INFLUX_ORG": "AMoRE2",                             # InfluxDB Organization
+  "INFLUX_BUCKET": "HV"                               # InfluxDB Bucket name
 }
 ```
 
